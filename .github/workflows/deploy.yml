@@ -1,0 +1,56 @@
+# The self-healing loop. On a schedule (and on merge), re-scrapes every member,
+# prunes dead sites, refreshes the planet feed, commits the data back (so failure
+# counts persist), builds the static site, and deploys to GitHub Pages.
+name: deploy
+on:
+  schedule:
+    - cron: "0 */6 * * *" # every 6h (free on public repos)
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Avoid overlapping runs racing on the data commit.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - name: Scrape members + rebuild index/feed
+        run: npm run scrape
+
+      - name: Commit refreshed data
+        run: |
+          git config user.name "webring-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add public/index.json public/feed.json public/feed.xml public/members.opml
+          git commit -m "chore: rebuild index [skip ci]" || echo "no changes"
+          git push || echo "nothing to push"
+
+      - name: Build static site
+        # Project Pages serve under /<repo>. For a user/org page or custom
+        # domain, set NEXT_PUBLIC_BASE_PATH to "" (empty).
+        env:
+          NEXT_PUBLIC_BASE_PATH: /webring
+        run: npx next build
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: out
+      - id: deploy
+        uses: actions/deploy-pages@v4
