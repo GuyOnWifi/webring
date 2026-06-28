@@ -1,0 +1,10 @@
+{
+  "id": "uwcs",
+  "name": "UW CS Webring",
+  "url": "https://guyonwifi.github.io/webring",
+  "description": "A self-running webring for the UW CS community. No maintainer required.",
+  "dropAfterFailures": 3,
+  "fetchTimeoutMs": 8000,
+  "postsPerSource": 3,
+  "feedMaxItems": 60
+}

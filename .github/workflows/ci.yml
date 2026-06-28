@@ -1,0 +1,57 @@
+# Runs on every PR. Validates member files, lints/typechecks the site, verifies
+# domain ownership, and auto-merges members-only PRs. No human maintainer in the loop.
+name: ci
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      # Fast, deterministic checks (no network).
+      - name: Validate member JSON
+        run: npm run validate
+      - name: Lint
+        run: npm run lint
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Build site (smoke test)
+        run: npm run build
+
+      # Network: only verify ownership for member files this PR changed.
+      - name: Changed files
+        id: diff
+        run: |
+          git fetch origin ${{ github.event.pull_request.base.sha }} --depth=1
+          echo "files=$(git diff --name-only ${{ github.event.pull_request.base.sha }} HEAD | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
+      - name: Verify domain ownership
+        env:
+          CHANGED_FILES: ${{ steps.diff.outputs.files }}
+        run: npm run verify
+
+      # Auto-merge only if the PR touches nothing but members/*.json.
+      - name: Guard — members-only PR
+        id: guard
+        run: |
+          BAD=$(git diff --name-only ${{ github.event.pull_request.base.sha }} HEAD | grep -v '^members/.*\.json$' || true)
+          if [ -n "$BAD" ]; then echo "Touches non-member files:"; echo "$BAD"; echo "safe=false" >> "$GITHUB_OUTPUT";
+          else echo "safe=true" >> "$GITHUB_OUTPUT"; fi
+      - name: Auto-merge
+        if: steps.guard.outputs.safe == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh pr merge ${{ github.event.pull_request.number }} --squash --admin

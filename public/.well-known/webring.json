@@ -1,0 +1,15 @@
+{
+  "name": "Ada Lovelace",
+  "description": "systems & compilers. ex-decentralization skeptic, now true believer.",
+  "url": "https://example.com",
+  "avatar": "/me.jpg",
+  "feed": "/index.xml",
+  "program": "CS 2026",
+  "socials": {
+    "github": "adalovelace",
+    "x": "adalovelace",
+    "linkedin": "adalovelace"
+  },
+  "tags": ["systems", "compilers", "rust"],
+  "rings": ["uwcs"]
+}
