@@ -52,7 +52,7 @@ body {
   height: 0.92em;
   margin-left: 0.06em;
   transform: translateY(0.06em);
-  background: #02a7fa;
+  background: #fa5053;
   animation: caret-blink 1.05s steps(1) infinite;
 }
 @keyframes caret-blink {
@@ -103,10 +103,10 @@ body {
 @keyframes beam-glow {
   0%,
   100% {
-    box-shadow: 0 0 0 rgba(2, 167, 250, 0);
+    box-shadow: 0 0 0 rgba(250, 80, 83, 0);
   }
   25% {
-    box-shadow: 0 0 26px -6px rgba(2, 167, 250, 0.6);
+    box-shadow: 0 0 26px -6px rgba(250, 80, 83, 0.6);
   }
 }
 /* one blue sweep around the rounded border (border-only), then gone */
@@ -123,9 +123,9 @@ body {
   background: conic-gradient(
     from var(--beam-angle),
     transparent 0 55%,
-    rgba(2, 167, 250, 0.25) 70%,
-    #02a7fa 84%,
-    #bfe9ff 90%,
+    rgba(250, 80, 83, 0.25) 70%,
+    #fa5053 84%,
+    #ffb3b4 90%,
     transparent 97%
   );
   /* show only the padding ring → looks like a lit border */
@@ -142,11 +142,11 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .shine-beam {
     animation: none;
-    box-shadow: 0 0 22px -8px rgba(2, 167, 250, 0.5);
+    box-shadow: 0 0 22px -8px rgba(250, 80, 83, 0.5);
   }
   .shine-beam::before {
     animation: none;
     opacity: 1;
-    background: #02a7fa;
+    background: #fa5053;
   }
 }

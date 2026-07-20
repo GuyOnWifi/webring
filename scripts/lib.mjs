@@ -134,6 +134,8 @@ const SOCIALS = {
   linkedin: { hosts: ["linkedin.com"], url: (h) => `https://linkedin.com/in/${h}` },
   instagram: { hosts: ["instagram.com"], url: (h) => `https://instagram.com/${h}` },
   mastodon: { hosts: null, url: (h) => h }, // federated: any host, full URL only
+  bluesky: { hosts: ["bsky.app"], url: (h) => `https://bsky.app/profile/${h}` },
+  matrix: { hosts: ["matrix.to"], url: (h) => h }, // federated: matrix.to link or @user:server id
 };
 
 function sanitizeSocials(raw) {
@@ -156,7 +158,11 @@ function sanitizeSocials(raw) {
     } else if (key === "mastodon" && /^@?[^@]+@[^@]+$/.test(v)) {
       const [, user, host] = v.match(/^@?([^@]+)@([^@]+)$/);
       href = `https://${host}/@${user}`;
-    } else if (cfg.hosts) {
+    } else if (key === "matrix" && /^@[^:@\s/]+:[^:@\s/]+$/.test(v)) {
+      href = `https://matrix.to/#/${v}`; // Matrix user id → universal (Element) link
+    } else if (cfg.hosts && key !== "matrix") {
+      // matrix has no bare-handle form (its handle IS @user:server, handled above),
+      // so it must not fall through to the generic handle→URL mapping.
       href = cfg.url(v.replace(/^@/, "").replace(/[^A-Za-z0-9._-]/g, ""));
     }
     if (href) out[key] = href.slice(0, 200);

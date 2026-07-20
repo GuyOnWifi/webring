@@ -61,6 +61,8 @@ const SOCIAL_BASE = {
   linkedin: "https://linkedin.com/in/",
   instagram: "https://instagram.com/",
   mastodon: "https://hachyderm.io/@",
+  bluesky: "https://bsky.app/profile/",
+  matrix: "https://matrix.to/#/@",
 };
 
 const usedTags = new Set();
@@ -84,7 +86,8 @@ for (let i = 0; i < N; i++) {
   usedPrograms.add(program);
 
   const socials = { github: SOCIAL_BASE.github + handle };
-  for (const k of ["x", "linkedin", "instagram", "mastodon"]) if (rnd() < 0.4) socials[k] = SOCIAL_BASE[k] + handle;
+  for (const k of ["x", "linkedin", "instagram", "mastodon", "bluesky", "matrix"])
+    if (rnd() < 0.4) socials[k] = SOCIAL_BASE[k] + handle + (k === "matrix" ? ":matrix.org" : "");
 
   const ok = rnd() > 0.1;
   const lastPost = new Date(NOW - Math.floor(rnd() * 200) * 86400000).toISOString();

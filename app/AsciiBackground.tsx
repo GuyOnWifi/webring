@@ -89,11 +89,11 @@ export default function AsciiBackground() {
         const g = GLYPHS[idx];
         if (g === " ") continue;
         const alpha = Math.max(0, Math.min(1, v)) * 0.9;
-        // tint from neutral gray → blue (#02a7fa) by depth inside the moving blob
+        // tint from neutral gray → strawberry red (#fa5053) by depth inside the moving blob
         const b = blueAt(x, y, time) * 0.9;
-        const cr = (210 + (2 - 210) * b) | 0;
-        const cg = (214 + (167 - 214) * b) | 0;
-        const cb = (222 + (250 - 222) * b) | 0;
+        const cr = (210 + (250 - 210) * b) | 0;
+        const cg = (214 + (80 - 214) * b) | 0;
+        const cb = (222 + (83 - 222) * b) | 0;
         ctx.fillStyle = `rgba(${cr},${cg},${cb},${alpha})`;
         ctx.fillText(g, x * CELL, y * CELL);
       }

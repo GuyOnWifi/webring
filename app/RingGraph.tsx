@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Member } from "./types";
 
 const homeOf = (m: Member) => m.homepage || `https://${m.domain}`;
@@ -12,6 +12,8 @@ const TRI_AMP = 0.12; // 3-fold radial shaping → rounded-triangle silhouette (
 const OSC_R = 26; // radial breathing amplitude (kept small so the triangle persists)
 const OSC_A = 0.1; // angular weave amplitude (nodes overtake/pass each other)
 const GLOBAL_ROT = 0.03; // slow overall rotation of the whole shape (rad/s)
+const BAND_AMP = 78; // per-node radial scatter → people spread into a thick ring band
+                     // instead of a single crammed wire (deterministic per index)
 
 // ── search response ──
 const SPREAD = 0.35; // ring dilation while a search is active
@@ -22,6 +24,8 @@ const K_REPEL = 0.07; // gentler shove so neighbors ease aside instead of dartin
 const K_HOME = 0.09; // spring toward the (oscillating) home position
 const DAMP = 0.8;
 const MAX_V = 6; // low speed cap → nodes drift, never dart
+const MIN_SEP = NR * 2 + 4; // min gap between node centers → circles never overlap
+const K_COLLIDE = 0.09; // pairwise overlap-repulsion strength (soft, overlap-only)
 
 // ── camera (critically-damped spring → smooth ease-in/ease-out, no snap) ──
 // lower CAM_STIFF = slower, more luxurious zoom; damping tracks it for no overshoot.
@@ -51,6 +55,7 @@ type Node = {
   vx: number;
   vy: number;
   base: number; // base angle on the ring
+  band: number; // fixed radial offset → thickens the ring so nodes aren't shoulder-to-shoulder
   fA: number;
   fR: number;
   pA: number;
@@ -121,7 +126,12 @@ export default function RingGraph({
   const lastTimeRef = useRef(0);
   const hoverRef = useRef(-1);
   const dragRef = useRef({ on: false, x: 0, y: 0, moved: false });
+  const heldRef = useRef(-1); // index of the person being dragged (or -1)
+  const heldPosRef = useRef({ x: 0, y: 0 }); // their pinned world position while held
+  const collideRef = useRef({ fx: new Float64Array(0), fy: new Float64Array(0) }); // reused collision-force buffers
   const sizeRef = useRef({ w: 300, h: 260, dpr: 1 });
+  // hover label overlay (DOM, so text stays crisp over the canvas)
+  const [tip, setTip] = useState<{ name: string; domain: string; ok: boolean; x: number; y: number } | null>(null);
 
   const needle = query.trim().toLowerCase();
 
@@ -138,13 +148,18 @@ export default function RingGraph({
     const n = members.length || 1;
     nodesRef.current = members.map((m, i) => {
       const base = (i / n) * Math.PI * 2 - Math.PI / 2;
+      // deterministic fract-sin hash → uniform-ish radial offset in [-BAND_AMP, BAND_AMP]
+      const h = Math.sin(i * 127.1 + 311.7) * 43758.5453;
+      const band = ((h - Math.floor(h)) * 2 - 1) * BAND_AMP;
+      const r0 = R_BASE + band;
       return {
         m,
-        x: Math.cos(base) * R_BASE,
-        y: Math.sin(base) * R_BASE,
+        x: Math.cos(base) * r0,
+        y: Math.sin(base) * r0,
         vx: 0,
         vy: 0,
         base,
+        band,
         fA: 0.12 + (i % 7) * 0.018,
         fR: 0.1 + (i % 5) * 0.02,
         pA: i * 1.7,
@@ -226,7 +241,7 @@ export default function RingGraph({
       if (!focus.length) {
         // Stable, analytic framing of the whole ring — no per-frame bbox jitter,
         // so the idle/intro camera has a rock-steady target to ease toward.
-        const ext = R_BASE * (1 + TRI_AMP) + OSC_R + NR + 8;
+        const ext = R_BASE * (1 + TRI_AMP) + BAND_AMP + OSC_R + NR + 8;
         const scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, Math.min(w, h) / (2 * ext)));
         return { x: 0, y: 0, scale };
       }
@@ -245,14 +260,32 @@ export default function RingGraph({
 
     const resetCamVel = () => { camVelRef.current.x = 0; camVelRef.current.y = 0; camVelRef.current.s = 0; };
     const onDown = (e: PointerEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      const hit = hitTest(e.clientX - rect.left, e.clientY - rect.top);
       dragRef.current = { on: true, x: e.clientX, y: e.clientY, moved: false };
       canvas.setPointerCapture(e.pointerId);
-      resetCamVel();
+      setTip(null); // hide label while interacting
+      if (hit >= 0) {
+        // grab a person: they follow the cursor; releasing springs them home
+        heldRef.current = hit;
+        const [wx, wy] = toWorld(e.clientX - rect.left, e.clientY - rect.top);
+        heldPosRef.current = { x: wx, y: wy };
+      } else {
+        heldRef.current = -1;
+        resetCamVel(); // empty space → pan the camera
+      }
+      canvas.style.cursor = "grabbing";
     };
     const onMove = (e: PointerEvent) => {
       const rect = canvas.getBoundingClientRect();
       const d = dragRef.current;
-      if (d.on) {
+      if (d.on && heldRef.current >= 0) {
+        // dragging a person — pin them under the cursor
+        if (Math.abs(e.clientX - d.x) + Math.abs(e.clientY - d.y) > 3) d.moved = true;
+        const [wx, wy] = toWorld(e.clientX - rect.left, e.clientY - rect.top);
+        heldPosRef.current = { x: wx, y: wy };
+      } else if (d.on) {
+        // dragging empty space — pan the camera
         const dx = e.clientX - d.x, dy = e.clientY - d.y;
         if (Math.abs(dx) + Math.abs(dy) > 3) d.moved = true;
         const cam = camRef.current;
@@ -261,18 +294,28 @@ export default function RingGraph({
         d.x = e.clientX; d.y = e.clientY;
         modeRef.current = "manual";
       } else {
-        hoverRef.current = hitTest(e.clientX - rect.left, e.clientY - rect.top);
-        canvas.style.cursor = hoverRef.current >= 0 ? "pointer" : "grab";
+        const lx = e.clientX - rect.left, ly = e.clientY - rect.top;
+        const hit = hitTest(lx, ly);
+        hoverRef.current = hit;
+        canvas.style.cursor = hit >= 0 ? "pointer" : "grab";
+        if (hit >= 0) {
+          const m = nodes[hit].m;
+          setTip({ name: m.name || m.domain, domain: m.domain, ok: m.ok !== false, x: lx, y: ly });
+        } else setTip(null);
       }
     };
+    const onLeave = () => { hoverRef.current = -1; setTip(null); };
     const onUp = (e: PointerEvent) => {
       const d = dragRef.current;
       const rect = canvas.getBoundingClientRect();
+      // a click (grabbed a person but never dragged) → open their site
       if (d.on && !d.moved) {
-        const hit = hitTest(e.clientX - rect.left, e.clientY - rect.top);
+        const hit = heldRef.current >= 0 ? heldRef.current : hitTest(e.clientX - rect.left, e.clientY - rect.top);
         if (hit >= 0) window.open(homeOf(nodes[hit].m), "_blank", "noopener");
       }
+      heldRef.current = -1; // release → the person springs back to the ring
       d.on = false;
+      canvas.style.cursor = "grab";
     };
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
@@ -291,6 +334,7 @@ export default function RingGraph({
     canvas.addEventListener("pointerdown", onDown);
     canvas.addEventListener("pointermove", onMove);
     canvas.addEventListener("pointerup", onUp);
+    canvas.addEventListener("pointerleave", onLeave);
     canvas.addEventListener("wheel", onWheel, { passive: false });
     canvas.addEventListener("dblclick", onDbl);
     canvas.style.cursor = "grab";
@@ -327,16 +371,45 @@ export default function RingGraph({
       const spread = 1 + SPREAD * fAmt;
       const rot = t * GLOBAL_ROT;
 
-      // ring physics: spring to oscillating home + repulsion away from matches
+      // Pass 1: pairwise collision. Soft, overlap-only repulsion so drawn circles
+      // never sit on top of each other. O(n²) — fine for a webring's member count.
+      // The held node participates (its fixed position shoves others aside as you drag).
+      const nn = nodes.length;
+      let cbuf = collideRef.current;
+      if (cbuf.fx.length !== nn) cbuf = collideRef.current = { fx: new Float64Array(nn), fy: new Float64Array(nn) };
+      const { fx: cfx, fy: cfy } = cbuf;
+      cfx.fill(0); cfy.fill(0);
+      for (let i = 0; i < nn; i++) {
+        for (let j = i + 1; j < nn; j++) {
+          let dx = nodes[i].x - nodes[j].x;
+          let dy = nodes[i].y - nodes[j].y;
+          let d2 = dx * dx + dy * dy;
+          if (d2 >= MIN_SEP * MIN_SEP) continue;
+          if (d2 < 1e-6) { dx = i % 2 ? 1 : -1; dy = 1; d2 = 2; } // exactly coincident → nudge apart
+          const d = Math.sqrt(d2);
+          const push = (MIN_SEP - d) * K_COLLIDE;
+          const ux = (dx / d) * push, uy = (dy / d) * push;
+          cfx[i] += ux; cfy[i] += uy;
+          cfx[j] -= ux; cfy[j] -= uy;
+        }
+      }
+
+      // Pass 2: spring to oscillating home + repulsion away from matches + collision.
       for (let i = 0; i < nodes.length; i++) {
         const nd = nodes[i];
+        if (i === heldRef.current) {
+          // held by the cursor — pin it, no spring, so it follows the drag
+          nd.x = heldPosRef.current.x; nd.y = heldPosRef.current.y;
+          nd.vx = 0; nd.vy = 0;
+          continue;
+        }
         const ang = nd.base + rot + OSC_A * Math.sin(t * nd.fA + nd.pA);
         const tri = 1 + TRI_AMP * Math.cos(3 * ang); // rounded-triangle silhouette
-        const rad = R_BASE * spread * tri + OSC_R * Math.sin(t * nd.fR + nd.pR);
+        const rad = R_BASE * spread * tri + nd.band + OSC_R * Math.sin(t * nd.fR + nd.pR);
         const hx = Math.cos(ang) * rad;
         const hy = Math.sin(ang) * rad;
-        let fx = (hx - nd.x) * K_HOME;
-        let fy = (hy - nd.y) * K_HOME;
+        let fx = (hx - nd.x) * K_HOME + cfx[i];
+        let fy = (hy - nd.y) * K_HOME + cfy[i];
         if (fAmt > 0.01) {
           for (const mi of focus) {
             if (mi === i) continue;
@@ -407,6 +480,7 @@ export default function RingGraph({
       canvas.removeEventListener("pointerdown", onDown);
       canvas.removeEventListener("pointermove", onMove);
       canvas.removeEventListener("pointerup", onUp);
+      canvas.removeEventListener("pointerleave", onLeave);
       canvas.removeEventListener("wheel", onWheel);
       canvas.removeEventListener("dblclick", onDbl);
     };
@@ -415,6 +489,25 @@ export default function RingGraph({
   return (
     <div ref={wrapRef} className={className}>
       <canvas ref={canvasRef} className="absolute inset-0 h-full w-full touch-none rounded-2xl" />
+
+      {/* hover label — follows the cursor, sits just above it */}
+      {tip && (
+        <div
+          className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full rounded-lg border border-white/10 bg-black/80 px-2.5 py-1.5 backdrop-blur-md"
+          style={{ left: tip.x, top: tip.y - 14 }}
+        >
+          <div className="flex items-center gap-1.5 whitespace-nowrap text-xs font-medium text-fg">
+            <span className={`h-1.5 w-1.5 rounded-full ${tip.ok ? "bg-emerald-400" : "bg-[#e5534b]"}`} />
+            {tip.name}
+          </div>
+          <div className="mt-0.5 whitespace-nowrap text-[11px] text-dim">{tip.domain} · ↗ click to visit</div>
+        </div>
+      )}
+
+      {/* persistent affordance so the graph reads as interactive at a glance */}
+      <div className="pointer-events-none absolute bottom-2.5 right-3 z-10 text-[11px] text-dim/70">
+        drag people · scroll · <span className="text-dim">click a node to visit</span>
+      </div>
     </div>
   );
 }
@@ -475,9 +568,9 @@ function draw(
     ctx.globalAlpha = ok ? 1 : 0.5;
     if (glow > 0.02) {
       ctx.save();
-      ctx.shadowColor = "rgba(96,165,250,0.95)";
+      ctx.shadowColor = "rgba(250,80,83,0.95)";
       ctx.shadowBlur = 8 + 20 * glow;
-      ctx.strokeStyle = `rgba(120,180,255,${0.45 + 0.55 * glow})`;
+      ctx.strokeStyle = `rgba(255,140,142,${0.45 + 0.55 * glow})`;
       ctx.lineWidth = 2 + 1.5 * glow;
       ctx.beginPath();
       ctx.arc(px, py, nodeR + 3 + 5 * glow, 0, Math.PI * 2);
