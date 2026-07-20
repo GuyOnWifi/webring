@@ -1,7 +1,8 @@
-# The self-healing loop. On a schedule (and on merge), re-scrapes every member,
-# prunes dead sites, refreshes the planet feed, commits the data back (so failure
-# counts persist), builds the static site, and deploys to GitHub Pages.
-name: deploy
+# The self-healing data loop. On a schedule (and on merge), re-scrapes every
+# member, prunes dead sites, refreshes the planet feed, and commits the data
+# back so failure counts persist. That committed public/*.json + feed is the
+# product — member sites consume it directly. No site host / Pages deploy.
+name: refresh
 on:
   schedule:
     - cron: "0 */6 * * *" # every 6h (free on public repos)
@@ -11,16 +12,14 @@ on:
 
 # Avoid overlapping runs racing on the data commit.
 concurrency:
-  group: deploy
+  group: refresh
   cancel-in-progress: false
 
 permissions:
   contents: write
-  pages: write
-  id-token: write
 
 jobs:
-  build:
+  refresh:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -40,23 +39,3 @@ jobs:
           git add public/index.json public/feed.json public/feed.xml public/members.opml
           git commit -m "chore: rebuild index [skip ci]" || echo "no changes"
           git push || echo "nothing to push"
-
-      - name: Build static site
-        # Project Pages serve under /<repo>. For a user/org page or custom
-        # domain, set NEXT_PUBLIC_BASE_PATH to "" (empty).
-        env:
-          NEXT_PUBLIC_BASE_PATH: /webring
-        run: npx next build
-
-      # enablement: true auto-creates the Pages site if it doesn't exist yet, so
-      # the workflow is self-provisioning. Without it, configure-pages fails on
-      # every run when Pages hasn't been turned on in repo Settings — which is
-      # exactly what was failing the scheduled deploy every 6h.
-      - uses: actions/configure-pages@v5
-        with:
-          enablement: true
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: out
-      - id: deploy
-        uses: actions/deploy-pages@v4
