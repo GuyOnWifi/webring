@@ -13,10 +13,18 @@ await mkdir(out, { recursive: true });
 const now = process.env.BUILD_TIME || new Date().toISOString();
 
 // Carry forward failure counts so we only drop after N consecutive misses.
+// Keep the raw prior files too, so the stable-timestamp guard below can tell a
+// real data change from pure timestamp churn.
 let prev = {};
+let oldIndexRaw = null;
+let oldFeedRaw = null;
 try {
-  const old = JSON.parse(await readFile(join(out, "index.json"), "utf8"));
+  oldIndexRaw = await readFile(join(out, "index.json"), "utf8");
+  const old = JSON.parse(oldIndexRaw);
   for (const m of old.members || []) prev[m.domain] = m;
+} catch {}
+try {
+  oldFeedRaw = await readFile(join(out, "feed.json"), "utf8");
 } catch {}
 
 const resolved = await Promise.all(
@@ -64,10 +72,32 @@ const index = {
   members: kept,
 };
 
+// Stable timestamp: if neither the member index nor the planet posts changed since
+// the last build, reuse the previous `generated` value so all four output files are
+// byte-identical. Otherwise the `generated`/`lastBuildDate`/`dateCreated` stamps
+// change every run, producing an empty-diff commit + push every 6h on the cron —
+// which spams notifications. Byte-identical output makes the workflow's
+// `git commit || echo "no changes"` a genuine no-op.
+let generated = now;
+try {
+  const oldIndex = oldIndexRaw && JSON.parse(oldIndexRaw);
+  const oldFeed = oldFeedRaw && JSON.parse(oldFeedRaw);
+  const sansTime = (o) => JSON.stringify({ ...o, generated: null });
+  if (
+    oldIndex &&
+    oldFeed &&
+    sansTime(index) === sansTime(oldIndex) &&
+    sansTime({ posts }) === sansTime({ posts: oldFeed.posts })
+  ) {
+    generated = oldIndex.generated;
+  }
+} catch {}
+index.generated = generated;
+
 await writeFile(join(out, "index.json"), JSON.stringify(index, null, 2));
-await writeFile(join(out, "feed.json"), JSON.stringify({ generated: now, posts }, null, 2));
-await writeFile(join(out, "feed.xml"), renderRss(index.ring, posts, now));
-await writeFile(join(out, "members.opml"), renderOpml(index.ring, live, now));
+await writeFile(join(out, "feed.json"), JSON.stringify({ generated, posts }, null, 2));
+await writeFile(join(out, "feed.xml"), renderRss(index.ring, posts, generated));
+await writeFile(join(out, "members.opml"), renderOpml(index.ring, live, generated));
 
 console.log(`Built ${cfg.name}: ${live.length} live / ${kept.length} listed, ${posts.length} posts`);
 if (dropped.length) console.log(`Dropped (>=${cfg.dropAfterFailures} fails): ${dropped.map((m) => m.domain).join(", ")}`);

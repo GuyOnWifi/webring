@@ -48,7 +48,13 @@ jobs:
           NEXT_PUBLIC_BASE_PATH: /webring
         run: npx next build
 
+      # enablement: true auto-creates the Pages site if it doesn't exist yet, so
+      # the workflow is self-provisioning. Without it, configure-pages fails on
+      # every run when Pages hasn't been turned on in repo Settings — which is
+      # exactly what was failing the scheduled deploy every 6h.
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: out

@@ -1,12 +1,15 @@
 @import "tailwindcss";
 
-/* Terminal-ish theme. Tailwind v4 generates utilities (bg-bg, text-dim, …) from these. */
+/* Black minimalist theme. Tailwind v4 generates utilities (bg-bg, text-dim, …) from these. */
 @theme {
-  --color-bg: #0c0d10;
-  --color-fg: #e6e6e6;
+  --color-bg: #08080a;
+  --color-fg: #ededed;
   --color-dim: #8b8f98;
-  --color-accent: #7ee787;
-  --color-line: #2a2d34;
+  --color-line: #20222a;
+  --color-panel: #101116;
+  /* Google Sans is loaded via <link> in layout.tsx; mono kept for the ASCII
+     background layer, code snippets, and graph labels. */
+  --font-sans: "Google Sans", ui-sans-serif, system-ui, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
@@ -16,5 +19,134 @@ html {
 body {
   background: var(--color-bg);
   color: var(--color-fg);
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* On-load entrance: fade in while sliding down into place, with easing.
+   fill-mode backwards → hidden during the stagger delay, natural styles after
+   (no lingering transform, so sticky elements keep working). */
+@keyframes enter {
+  from {
+    opacity: 0;
+    transform: translateY(-16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.enter {
+  animation: enter 0.6s cubic-bezier(0.22, 0.61, 0.36, 1) backwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .enter {
+    animation: none;
+  }
+}
+
+/* Terminal-style typing caret (blue) for the title. */
+.caret {
+  display: inline-block;
+  width: 0.5ch;
+  height: 0.92em;
+  margin-left: 0.06em;
+  transform: translateY(0.06em);
+  background: #fa5053;
+  animation: caret-blink 1.05s steps(1) infinite;
+}
+@keyframes caret-blink {
+  0%,
+  50% {
+    opacity: 1;
+  }
+  50.01%,
+  100% {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .caret {
+    animation: none;
+  }
+}
+
+/* Border-beam: a blue shine that travels around a matched row's rounded border,
+   with a soft pulsing glow. Used on directory rows that match the search. */
+@property --beam-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+@keyframes beam-spin {
+  from {
+    --beam-angle: 0deg;
+  }
+  to {
+    --beam-angle: 360deg;
+  }
+}
+@keyframes beam-fade {
+  0% {
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes beam-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 rgba(250, 80, 83, 0);
+  }
+  25% {
+    box-shadow: 0 0 26px -6px rgba(250, 80, 83, 0.6);
+  }
+}
+/* one blue sweep around the rounded border (border-only), then gone */
+.shine-beam {
+  position: relative;
+  animation: beam-glow 1.2s ease-out forwards;
+}
+.shine-beam::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1.6px; /* border thickness */
+  background: conic-gradient(
+    from var(--beam-angle),
+    transparent 0 55%,
+    rgba(250, 80, 83, 0.25) 70%,
+    #fa5053 84%,
+    #ffb3b4 90%,
+    transparent 97%
+  );
+  /* show only the padding ring → looks like a lit border */
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation:
+    beam-spin 1.2s linear forwards,
+    beam-fade 1.2s ease-out forwards;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .shine-beam {
+    animation: none;
+    box-shadow: 0 0 22px -8px rgba(250, 80, 83, 0.5);
+  }
+  .shine-beam::before {
+    animation: none;
+    opacity: 1;
+    background: #fa5053;
+  }
 }

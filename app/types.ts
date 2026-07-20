@@ -1,4 +1,6 @@
-export type Socials = Partial<Record<"github" | "x" | "linkedin" | "instagram" | "mastodon", string>>;
+export type Socials = Partial<
+  Record<"github" | "x" | "linkedin" | "instagram" | "mastodon" | "bluesky" | "matrix", string>
+>;
 
 export type Member = {
   domain: string;
