@@ -49,25 +49,33 @@ for (const { file, domain } of toCheck) {
     continue;
   }
 
-  // No consent signal at all. Block the merge and hand over a ready-to-paste file.
+  // No usable consent signal. Block the merge and hand over a ready-to-paste file.
   failed = true;
   console.log(`FAIL ${file}: ${domain} (${r.error})`);
   const snippet = await draftSnippet(domain);
-  if (snippet) {
+  const recheck = "Then re-run this check, or comment `/recheck` on this PR, and I'll take another look.";
+
+  if (!snippet) {
+    sections.push(
+      `### ❌ \`${domain}\`, couldn't reach your site\n` +
+      `I tried \`https://${domain}/\` but got: \`${r.error}\`. Is it up and served over HTTPS? ` +
+      `Once it's reachable, add a \`webring.json\` or the widget. ${recheck}`
+    );
+  } else if (/not valid JSON/i.test(r.error || "")) {
+    sections.push(
+      `### ❌ \`${domain}\`, your \`webring.json\` isn't valid JSON\n` +
+      `I fetched \`https://${domain}/.well-known/webring.json\` but couldn't parse it (\`${r.error}\`). ` +
+      `Fix the syntax, then keep your \`${cfg.id}\` block. Here's a valid one, prefilled from your ` +
+      `page, to model it on:\n\n${snippet}\n${recheck}`
+    );
+  } else {
     sections.push(
       `### ❌ \`${domain}\`, no consent signal yet\n` +
       `👋 Hey! I didn't find a \`${cfg.id}\` block in your \`/.well-known/webring.json\`, and no ` +
       `\`data-webring="${cfg.id}"\` widget on your homepage. Good news, I read your page's ` +
       `OpenGraph/h-card tags and drafted one. Pick either:\n\n` +
       `1. Save this to \`https://${domain}/.well-known/webring.json\`:\n\n${snippet}\n` +
-      `2. Or paste the ring widget (see the README) on your homepage.\n\n` +
-      `Push again after either, and I'll re-check automatically.`
-    );
-  } else {
-    sections.push(
-      `### ❌ \`${domain}\`, couldn't reach your site\n` +
-      `I tried \`https://${domain}/\` but got: \`${r.error}\`. Is it up and served over HTTPS? ` +
-      `Once it's reachable, add a \`webring.json\` or the widget and push again.`
+      `2. Or paste the ring widget (see the README) on your homepage.\n\n${recheck}`
     );
   }
 }

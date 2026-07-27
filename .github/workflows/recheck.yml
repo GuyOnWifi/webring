@@ -1,0 +1,72 @@
+# Lets anyone re-trigger the join check by commenting "/recheck" on a PR. Handy after a
+# member fixes their site, since verify.mjs fetches the site live each run. Same trust
+# model as ci.yml: runs base-branch scripts against the PR's members/*.json data only,
+# never executes PR code.
+name: recheck
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: ci-pr-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  recheck:
+    # Only on PR comments (not issues) that contain the /recheck command.
+    if: ${{ github.event.issue.pull_request && contains(github.event.comment.body, '/recheck') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4 # trusted base branch, no PR code
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: React to the command
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh api "repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions" -f content=eyes || true
+
+      - name: Pull PR member data
+        id: diff
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          pr='${{ github.event.issue.number }}'
+          files=$(gh pr diff "$pr" --name-only)
+          echo "files=$(echo "$files" | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
+          if echo "$files" | grep -qv -e '^members/.*\.json$' -e '^$'; then
+            echo "safe=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "safe=true" >> "$GITHUB_OUTPUT"
+          fi
+          git fetch origin "pull/$pr/head:pr" --depth=1
+          git checkout pr -- members/
+
+      - name: Validate member JSON
+        run: node scripts/validate.mjs
+
+      - name: Verify domain ownership (+ draft suggestion)
+        id: verify
+        env:
+          CHANGED_FILES: ${{ steps.diff.outputs.files }}
+          PR_COMMENT_FILE: pr-comment.md
+        run: node scripts/verify.mjs
+
+      - name: Comment on PR
+        if: always() && hashFiles('pr-comment.md') != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr comment '${{ github.event.issue.number }}' --body-file pr-comment.md --edit-last \
+            || gh pr comment '${{ github.event.issue.number }}' --body-file pr-comment.md
+
+      - name: Auto-merge
+        if: steps.diff.outputs.safe == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh pr merge '${{ github.event.issue.number }}' --squash --admin
