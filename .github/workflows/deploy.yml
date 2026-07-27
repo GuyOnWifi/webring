@@ -1,8 +1,9 @@
-# The self-healing data loop. On a schedule (and on merge), re-scrapes every
-# member, prunes dead sites, refreshes the planet feed, and commits the data
-# back so failure counts persist. That committed public/*.json + feed is the
-# product — member sites consume it directly. No site host / Pages deploy.
-name: refresh
+# Self-healing data loop + static deploy. On a schedule (and on push to main), it
+# re-scrapes every member, prunes dead sites, refreshes the planet feed, commits the
+# data back (so failure counts persist), then builds the static site and deploys it to
+# GitHub Pages. The committed public/*.json is still consumed directly by member widgets;
+# Pages serves the human-facing directory / planet / map.
+name: refresh + deploy
 on:
   schedule:
     - cron: "0 */6 * * *" # every 6h (free on public repos)
@@ -10,17 +11,22 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# Avoid overlapping runs racing on the data commit.
+# One run at a time: avoid racing on the data commit or overlapping Pages deploys.
 concurrency:
-  group: refresh
+  group: refresh-deploy
   cancel-in-progress: false
 
 permissions:
-  contents: write
+  contents: write # commit refreshed data
+  pages: write # deploy to Pages
+  id-token: write # OIDC for deploy-pages
 
 jobs:
-  refresh:
+  refresh-deploy:
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -39,3 +45,16 @@ jobs:
           git add public/index.json public/feed.json public/feed.xml public/members.opml
           git commit -m "chore: rebuild index [skip ci]" || echo "no changes"
           git push || echo "nothing to push"
+
+      - name: Build static site
+        env:
+          NEXT_PUBLIC_BASE_PATH: /webring # project page: guyonwifi.github.io/webring
+        run: npx next build
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: out
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
