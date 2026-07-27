@@ -24,18 +24,13 @@ for (const f of files) {
     errors.push(`${f}: must be a JSON object.`);
     continue;
   }
-  const hasSite = typeof data.site === "string" && data.site.trim();
-  const hasDomain = typeof data.domain === "string" && data.domain.trim();
-  if (!hasSite && !hasDomain) {
-    errors.push(`${f}: needs a "site" URL (e.g. "https://you.com/" or "https://host/~you/") or a bare "domain".`);
+  if (typeof data.site !== "string" || !data.site.trim()) {
+    errors.push(`${f}: needs a "site" field, your site URL (e.g. "https://you.com/" or "https://host/~you/").`);
     continue;
-  }
-  if (hasDomain && !hasSite && /\/|^https?:/i.test(data.domain)) {
-    errors.push(`${f}: "domain" must be a bare host (no scheme or path). Use "site" for a full URL.`);
   }
   const site = memberSite(data);
   if (!site) {
-    errors.push(`${f}: "${data.site || data.domain}" is not a valid site URL.`);
+    errors.push(`${f}: "${data.site}" is not a valid site URL.`);
     continue;
   }
   if (seen.has(site)) {
@@ -55,9 +50,8 @@ if (errors.length) {
       `## 🤖 ${cfg.name}, join check\n\n` +
       `I couldn't add you yet. Your member file has a formatting problem:\n\n` +
       errors.map((e) => `- ${e}`).join("\n") +
-      `\n\nThe file should be just \`{ "site": "https://your-site.com/" }\` (a full URL, path ` +
-      `OK), or a bare \`{ "domain": "you.com" }\`. Fix it in your PR, then re-run this check ` +
-      `or comment \`/recheck\`.\n`;
+      `\n\nThe file should be just \`{ "site": "https://your-site.com/" }\` (a full URL, a ` +
+      `path like \`/~you/\` is fine). Fix it in your PR, then re-run this check or comment \`/recheck\`.\n`;
     await writeFile(process.env.PR_COMMENT_FILE, body);
   }
   process.exit(1);

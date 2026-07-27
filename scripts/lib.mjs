@@ -11,10 +11,10 @@ export async function loadConfig() {
   return JSON.parse(await readFile(join(ROOT, "ring.config.json"), "utf8"));
 }
 
-// Each member file is members/<name>.json — the ONLY thing a PR edits. Identity is a
-// "site": a full URL that may include a path (e.g. https://host/~you/), so people on
-// shared/path-based hosting work too. Accept { "site": "<url>" } or, as apex shorthand,
-// { "domain": "their-site.com" }.
+// Each member file is members/<name>.json — the ONLY thing a PR edits. It holds one
+// field, "site": your site URL. It may include a path (e.g. https://host/~you/) so
+// people on shared/path-based hosting work too, and a bare host like "you.com" is
+// accepted and upgraded to https.
 export async function loadMembers() {
   const dir = join(ROOT, "members");
   const files = (await readdir(dir)).filter((f) => f.endsWith(".json"));
@@ -22,26 +22,17 @@ export async function loadMembers() {
   for (const f of files) {
     const data = JSON.parse(await readFile(join(dir, f), "utf8"));
     const site = memberSite(data);
-    if (!site) throw new Error(`${f}: needs a "site" URL or a bare "domain"`);
+    if (!site) throw new Error(`${f}: needs a "site" (your site URL)`);
     members.push({ file: f, site });
   }
   return members;
 }
 
-export function normalizeDomain(d) {
-  return String(d).trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/+$/, "");
-}
-
 // Canonical site URL for a member: https, no query/hash, trailing slash (so relative
-// lookups like ".well-known/webring.json" resolve UNDER the path). Returns null if
-// neither a valid "site" URL nor a "domain" host is present.
+// lookups like ".well-known/webring.json" resolve UNDER the path). Accepts a bare host
+// or a full URL in `site`. Returns null if `site` is missing or unparseable.
 export function memberSite(data) {
-  let raw =
-    typeof data.site === "string" && data.site.trim()
-      ? data.site.trim()
-      : typeof data.domain === "string" && data.domain.trim()
-        ? normalizeDomain(data.domain)
-        : null;
+  let raw = typeof data.site === "string" && data.site.trim() ? data.site.trim() : null;
   if (!raw) return null;
   if (!/^https?:\/\//i.test(raw)) raw = `https://${raw}`;
   let u;

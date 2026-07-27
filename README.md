@@ -58,9 +58,9 @@ the source of truth for its own metadata.**
    ```json
    { "site": "https://your-site.com/" }
    ```
-   Use your full site URL, path and all, if you're on shared hosting:
-   `{ "site": "https://www.student.math.uwaterloo.ca/~you/" }`. For an apex domain,
-   `{ "domain": "your-site.com" }` is accepted as shorthand. A bot fetches your site,
+   That's the whole file: your site URL. A bare host like `"you.com"` works too (it
+   becomes `https://`), and a path is fine for shared hosting:
+   `{ "site": "https://www.student.math.uwaterloo.ca/~you/" }`. A bot fetches your site,
    confirms the `uwcs` consent, and auto-merges. You never wait on a human.
 
 3. **Paste the widget** anywhere on your site (the footer is traditional):
