@@ -63,9 +63,7 @@ jobs:
         if: always() && hashFiles('pr-comment.md') != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh pr comment '${{ github.event.issue.number }}' --body-file pr-comment.md --edit-last \
-            || gh pr comment '${{ github.event.issue.number }}' --body-file pr-comment.md
+        run: gh pr comment '${{ github.event.issue.number }}' --body-file pr-comment.md
 
       - name: Auto-merge
         if: steps.diff.outputs.safe == 'true'
