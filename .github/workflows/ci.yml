@@ -53,6 +53,8 @@ jobs:
 
       # Trusted scripts (base branch), run against the PR's member data. No deps needed.
       - name: Validate member JSON
+        env:
+          PR_COMMENT_FILE: pr-comment.md
         run: node scripts/validate.mjs
 
       - name: Verify domain ownership (+ draft suggestion)

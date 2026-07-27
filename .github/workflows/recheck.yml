@@ -48,6 +48,8 @@ jobs:
           git checkout pr -- members/
 
       - name: Validate member JSON
+        env:
+          PR_COMMENT_FILE: pr-comment.md
         run: node scripts/validate.mjs
 
       - name: Verify domain ownership (+ draft suggestion)

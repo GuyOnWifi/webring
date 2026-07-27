@@ -1,8 +1,8 @@
 // Structural validation of members/*.json — runs in CI on every PR, before the
 // network-dependent ownership check. Fast, deterministic, catches malformed entries.
-import { readdir, readFile } from "node:fs/promises";
+import { readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { ROOT, normalizeDomain } from "./lib.mjs";
+import { ROOT, normalizeDomain, loadConfig } from "./lib.mjs";
 
 const dir = join(ROOT, "members");
 const files = (await readdir(dir)).filter((f) => f.endsWith(".json"));
@@ -17,7 +17,7 @@ for (const f of files) {
   try {
     data = JSON.parse(await readFile(join(dir, f), "utf8"));
   } catch (e) {
-    errors.push(`${f}: invalid JSON — ${e.message}`);
+    errors.push(`${f}: invalid JSON: ${e.message}`);
     continue;
   }
   if (typeof data !== "object" || data === null || Array.isArray(data)) {
@@ -44,6 +44,18 @@ for (const f of files) {
 
 if (errors.length) {
   console.error(`✗ ${errors.length} problem(s):\n` + errors.map((e) => "  - " + e).join("\n"));
+  // Surface the structural problems on the PR too (validate runs before verify and
+  // exits, so verify never gets to write a comment). The workflow posts this file.
+  if (process.env.PR_COMMENT_FILE) {
+    const cfg = await loadConfig();
+    const body =
+      `## 🤖 ${cfg.name}, join check\n\n` +
+      `I couldn't add you yet. Your member file has a formatting problem:\n\n` +
+      errors.map((e) => `- ${e}`).join("\n") +
+      `\n\nThe file should be just \`{ "domain": "you.com" }\` (a bare host, no https:// or ` +
+      `path). Fix it in your PR, then re-run this check or comment \`/recheck\`.\n`;
+    await writeFile(process.env.PR_COMMENT_FILE, body);
+  }
   process.exit(1);
 }
 console.log(`✓ ${files.length} member file(s) valid.`);
