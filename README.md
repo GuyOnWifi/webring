@@ -17,14 +17,15 @@ the source of truth for its own metadata.**
 
 ## How to join (2 minutes)
 
-1. **Serve a well-known file** at `https://YOUR-SITE.com/.well-known/webring.json`:
+1. **Serve a `webring.json`** on your site, at `/.well-known/webring.json`. On shared or
+   path hosting where you can't write the site root (e.g. `host/~you/`), put it at
+   `<your-page>/webring.json` instead; the bot checks both:
 
    ```json
    {
      "uwcs": {
        "name": "Your Name",
        "description": "one line about you",
-       "url": "https://your-site.com",
        "avatar": "/me.png",
        "feed": "/index.xml",
        "tags": ["rust", "systems"]
@@ -32,34 +33,35 @@ the source of truth for its own metadata.**
    }
    ```
    Each top-level key is a **ring namespace**; the presence of a `"uwcs"` block is how you
-   opt in. Serving this file proves you own the domain — that's your consent. Everything
-   inside the block is yours to fill in however you want to present yourself _in this ring_.
+   opt in. Serving this file proves you control the site, that's your consent. There's no
+   `url` field: your homepage is just the site you register in step 2.
 
-   Joining more than one ring? Add a block per ring — each can describe you differently:
+   Joining more than one ring? Add a block per ring, each can describe you differently:
 
    ```json
    {
-     "$shared": { "name": "Your Name", "url": "https://your-site.com", "avatar": "/me.png", "feed": "/index.xml" },
+     "$shared": { "name": "Your Name", "avatar": "/me.png", "feed": "/index.xml" },
      "uwcs": { "description": "systems hacker @ waterloo", "tags": ["rust", "systems"] },
      "some-other-ring": { "description": "aspiring poet", "tags": ["writing"] }
    }
    ```
    Reserved `$`-prefixed keys aren't rings; `$shared` is merged underneath every ring block
-   (the ring block wins) so you don't repeat your name/url in each one.
+   (the ring block wins) so you don't repeat yourself.
 
-   **Don't want to author JSON?** Skip step 1. Instead just add the widget below
-   (it links back to the ring) anywhere on your homepage — that link _is_ your consent
-   signal. The builder then auto-scrapes your name/description/avatar/feed from your
-   page's [h-card](https://microformats.org/wiki/h-card) or OpenGraph tags, and the join
-   bot will suggest a ready-to-paste `uwcs` block from what it found.
+   **Don't want to author JSON?** Skip step 1. Just add the widget below anywhere on your
+   page; its `data-webring="uwcs"` marker _is_ your consent signal. The builder then scrapes
+   your name/description/avatar/feed from your page's [h-card](https://microformats.org/wiki/h-card)
+   or OpenGraph tags, and the join bot suggests a ready-to-paste `uwcs` block from what it found.
 
 2. **Add one file** `members/your-name.json` via PR:
 
    ```json
-   { "domain": "your-site.com" }
+   { "site": "https://your-site.com/" }
    ```
-   A bot fetches your well-known file, confirms it opted into `uwcs`, and auto-merges.
-   You never wait on a human.
+   Use your full site URL, path and all, if you're on shared hosting:
+   `{ "site": "https://www.student.math.uwaterloo.ca/~you/" }`. For an apex domain,
+   `{ "domain": "your-site.com" }` is accepted as shorthand. A bot fetches your site,
+   confirms the `uwcs` consent, and auto-merges. You never wait on a human.
 
 3. **Paste the widget** anywhere on your site (the footer is traditional):
 
@@ -72,10 +74,11 @@ the source of truth for its own metadata.**
      <a href="https://guyonwifi.github.io/webring/hop.html?from=your-site.com&nav=next" title="next site">→</a>
    </div>
    ```
-   Swap both `your-site.com` for your domain. Plain HTML, no scripts. The
-   `data-webring="uwcs"` marker doubles as your **consent signal** — the verify bot looks
-   for it. Prev/next resolve against the live ring at click time (via `hop.html`), so
-   neighbours re-stitch themselves as sites come and go — you never edit this again.
+   Swap both `from=your-site.com` for your site (a host, or `host/~you` if you're on
+   path hosting). Plain HTML, no scripts. The `data-webring="uwcs"` marker doubles as your
+   **consent signal**, the verify bot looks for it. Prev/next resolve against the live ring
+   at click time (via `hop.html`), so neighbours re-stitch as sites come and go, and you
+   never edit this again.
 
 ## How it works
 
@@ -83,7 +86,7 @@ the source of truth for its own metadata.**
 you edit YOUR site (well-known + widget snippet)
         │
         ▼
-  verify bot confirms domain ownership ──► auto-merges members/you.json
+  verify bot confirms site ownership ──► auto-merges members/you.json
         │
         ▼
   builder (cron, every 6h) scrapes everyone, drops dead sites ──► public/index.json
@@ -94,8 +97,8 @@ you edit YOUR site (well-known + widget snippet)
 
 | Piece | File | Job |
 |-------|------|-----|
-| Member record | `members/*.json` | The only PR-editable data: one domain. |
-| Well-known spec | `.well-known/webring.json` | Per-site metadata + proof of ownership. |
+| Member record | `members/*.json` | The only PR-editable data: one site URL. |
+| Manifest spec | `.well-known/webring.json` or `<site>/webring.json` | Per-site metadata + proof of consent. |
 | Verify bot | `scripts/verify.mjs` + `.github/workflows/verify.yml` | Replaces the maintainer. |
 | Builder | `scripts/build.mjs` + `.github/workflows/build.yml` | Derives `index.json`, prunes the dead. |
 | Widget | pasted HTML + `public/hop.html` | Static embed + `data-webring` marker; prev/next resolve live, self-healing. |

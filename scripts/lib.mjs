@@ -11,22 +11,60 @@ export async function loadConfig() {
   return JSON.parse(await readFile(join(ROOT, "ring.config.json"), "utf8"));
 }
 
-// Each member file is members/<name>.json — the ONLY thing a PR edits.
-// Required: { "domain": "their-site.com" }. Everything else is scraped.
+// Each member file is members/<name>.json — the ONLY thing a PR edits. Identity is a
+// "site": a full URL that may include a path (e.g. https://host/~you/), so people on
+// shared/path-based hosting work too. Accept { "site": "<url>" } or, as apex shorthand,
+// { "domain": "their-site.com" }.
 export async function loadMembers() {
   const dir = join(ROOT, "members");
   const files = (await readdir(dir)).filter((f) => f.endsWith(".json"));
   const members = [];
   for (const f of files) {
     const data = JSON.parse(await readFile(join(dir, f), "utf8"));
-    if (!data.domain) throw new Error(`${f}: missing "domain"`);
-    members.push({ file: f, domain: normalizeDomain(data.domain) });
+    const site = memberSite(data);
+    if (!site) throw new Error(`${f}: needs a "site" URL or a bare "domain"`);
+    members.push({ file: f, site });
   }
   return members;
 }
 
 export function normalizeDomain(d) {
   return String(d).trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/+$/, "");
+}
+
+// Canonical site URL for a member: https, no query/hash, trailing slash (so relative
+// lookups like ".well-known/webring.json" resolve UNDER the path). Returns null if
+// neither a valid "site" URL nor a "domain" host is present.
+export function memberSite(data) {
+  let raw =
+    typeof data.site === "string" && data.site.trim()
+      ? data.site.trim()
+      : typeof data.domain === "string" && data.domain.trim()
+        ? normalizeDomain(data.domain)
+        : null;
+  if (!raw) return null;
+  if (!/^https?:\/\//i.test(raw)) raw = `https://${raw}`;
+  let u;
+  try {
+    u = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (u.protocol !== "https:" && u.protocol !== "http:") return null;
+  u.hash = "";
+  u.search = "";
+  if (!u.pathname.endsWith("/")) u.pathname += "/";
+  return u.href;
+}
+
+// Short display label for a site URL: host + path, no scheme or trailing slash.
+export function siteLabel(site) {
+  try {
+    const u = new URL(site);
+    return (u.host + u.pathname).replace(/\/$/, "");
+  } catch {
+    return site;
+  }
 }
 
 async function get(url, timeoutMs, maxBytes) {
@@ -45,59 +83,59 @@ async function get(url, timeoutMs, maxBytes) {
   }
 }
 
-// Resolve a member's metadata + prove consent to be in THIS ring.
-// Two valid consent signals (either proves the domain owner opted in):
-//   1. /.well-known/webring.json has a block keyed by the ring id  (explicit, preferred)
-//   2. the homepage links back to the ring url        (implicit — the widget snippet does this)
+// Resolve a member's metadata + prove consent, everything relative to their site URL
+// (which may include a path like https://host/~you/). Consent signals:
+//   1. a webring.json with a block keyed by the ring id, checked at <site>.well-known/
+//      first (proper convention; for apex sites that's the origin root), then
+//      <site>webring.json (a plain file path-scoped sites can actually write). Preferred.
+//   2. the data-webring widget marker on the page itself.
 // Returns { ok, source, data?, error? }.
-export async function resolveMember(domain, cfg) {
+export async function resolveMember(site, cfg) {
   const timeout = cfg.fetchTimeoutMs;
 
-  // 1. Well-known (authoritative + richest metadata).
-  const wk = await get(`https://${domain}/.well-known/webring.json`, timeout, 64 * 1024);
-  if (wk.ok) {
+  // 1. Manifest, relative to the site URL.
+  for (const rel of [".well-known/webring.json", "webring.json"]) {
+    const wk = await get(new URL(rel, site).href, timeout, 64 * 1024);
+    if (!wk.ok) continue;
     let data;
     try {
       data = JSON.parse(wk.raw);
     } catch {
-      return { ok: false, error: "well-known file is not valid JSON" };
+      return { ok: false, error: "webring.json is not valid JSON" };
     }
-    // Namespaced format: each top-level key is a ring id, its value that ring's record.
-    // "$"-prefixed keys are reserved ($shared = defaults merged under every ring block),
-    // so a single well-known file can present differently in each ring it joins.
+    // Namespaced: each top-level key is a ring id; "$"-prefixed keys are reserved
+    // ($shared merges under every ring block), so one file can serve many rings.
     const block = data[cfg.id];
     if (block && typeof block === "object" && !Array.isArray(block)) {
       const shared = data.$shared && typeof data.$shared === "object" ? data.$shared : {};
-      return { ok: true, source: "well-known", data: sanitize({ ...shared, ...block }, domain) };
+      return { ok: true, source: "well-known", data: sanitize({ ...shared, ...block }, site) };
     }
     // Legacy flat format: { ...fields, "rings": ["uwcs"] }.
     const rings = Array.isArray(data.rings) ? data.rings : [];
-    if (rings.includes(cfg.id)) return { ok: true, source: "well-known", data: sanitize(data, domain) };
-    return { ok: false, error: `well-known has no "${cfg.id}" block` };
+    if (rings.includes(cfg.id)) return { ok: true, source: "well-known", data: sanitize(data, site) };
+    return { ok: false, error: `webring.json has no "${cfg.id}" block` };
   }
 
-  // 2. Fallback: scrape the homepage. Require a link back to the ring as consent,
-  //    then lift metadata from h-card microformats / OpenGraph / <title>.
-  const home = await get(`https://${domain}/`, timeout, 512 * 1024);
+  // 2. Fallback: the widget marker on the page itself.
+  const home = await get(site, timeout, 512 * 1024);
   if (!home.ok) return { ok: false, error: home.error };
   if (!hasWidget(home.raw, cfg)) {
-    return { ok: false, error: `no well-known file and no "${cfg.id}" webring widget on the homepage` };
+    return { ok: false, error: `no webring.json and no "${cfg.id}" widget at ${siteLabel(site)}` };
   }
-  return { ok: true, source: "scraped", data: sanitize(scrapeMeta(home.raw, domain), domain) };
+  return { ok: true, source: "scraped", data: sanitize(scrapeMeta(home.raw, site), site) };
 }
 
 // For the join bot: build a ready-to-paste ring block from whatever we can scrape
 // off the homepage (OG/h-card). Used to *suggest* a webring.json when none exists —
 // no consent link-back required, since this only drafts a suggestion, grants nothing.
 // Returns { ok, block } or { ok:false, error }.
-export async function suggestFromSite(domain, cfg) {
-  const home = await get(`https://${domain}/`, cfg.fetchTimeoutMs, 512 * 1024);
+export async function suggestFromSite(site, cfg) {
+  const home = await get(site, cfg.fetchTimeoutMs, 512 * 1024);
   if (!home.ok) return { ok: false, error: home.error };
-  const m = sanitize(scrapeMeta(home.raw, domain), domain);
+  const m = sanitize(scrapeMeta(home.raw, site), site);
   const block = {
     name: m.name,
     description: m.description || "one line about you",
-    url: m.homepage,
     ...(m.avatar ? { avatar: m.avatar } : {}),
     ...(m.feed ? { feed: m.feed } : {}),
     ...(m.program ? { program: m.program } : {}),
@@ -120,7 +158,7 @@ function escapeRe(s) {
 
 // Best-effort metadata from raw HTML — h-card (microformats2) first, then OpenGraph,
 // then plain <title>/<meta name=description>. All values get sanitized afterward.
-function scrapeMeta(html, domain) {
+function scrapeMeta(html, site) {
   const attr = (re) => (html.match(re) || [])[1];
   const mf = (cls) =>
     (html.match(new RegExp(`class=["'][^"']*\\b${cls}\\b[^"']*["'][^>]*>([^<]+)<`, "i")) || [])[1];
@@ -135,14 +173,13 @@ function scrapeMeta(html, domain) {
       og("description") ||
       attr(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i),
     avatar: (photo && photo[1]) || og("image"),
-    feed: discoverFeed(html, domain),
-    url: og("url") || `https://${domain}`,
+    feed: discoverFeed(html, site),
     tags: [],
   };
 }
 
 // RSS/Atom autodiscovery: <link rel="alternate" type="application/rss+xml" href="...">
-function discoverFeed(html, domain) {
+function discoverFeed(html, site) {
   const m = html.match(
     /<link[^>]+type=["']application\/(?:rss|atom)\+xml["'][^>]*>/i
   );
@@ -150,7 +187,7 @@ function discoverFeed(html, domain) {
   const href = (m[0].match(/href=["']([^"']+)["']/i) || [])[1];
   if (!href) return undefined;
   try {
-    return new URL(href, `https://${domain}`).href;
+    return new URL(href, site).href;
   } catch {
     return undefined;
   }
@@ -201,13 +238,13 @@ function sanitizeSocials(raw) {
 }
 
 // Member-supplied data is untrusted. Strip HTML, cap lengths, only allow known fields.
-function sanitize(data, domain) {
+function sanitize(data, site) {
   const text = (v, max) =>
     typeof v === "string" ? v.replace(/<[^>]*>/g, "").trim().slice(0, max) : undefined;
   const url = (v) => {
     if (typeof v !== "string") return undefined;
     try {
-      const u = new URL(v, `https://${domain}`);
+      const u = new URL(v, site); // relative refs resolve against the member's site URL
       return u.protocol === "https:" || u.protocol === "http:" ? u.href : undefined;
     } catch {
       return undefined;
@@ -216,20 +253,15 @@ function sanitize(data, domain) {
   const tags = Array.isArray(data.tags)
     ? data.tags.map((x) => text(x, 24)).filter(Boolean).slice(0, 8)
     : [];
-  // The homepage link must live on the verified host (same host or a subdomain of it).
-  // Paths are fine (e.g. www.student.math.uwaterloo.ca/~you); the host is what's pinned,
-  // so a verified member can't get the ring to link their entry at someone else's site.
-  const onDomain = (u) => {
-    if (!u) return undefined;
-    const h = new URL(u).host;
-    return h === domain || h.endsWith("." + domain) ? u : undefined;
-  };
+  const label = siteLabel(site);
   return {
-    name: text(data.name, 60) || domain,
+    site,
+    domain: label,
+    homepage: site, // the site IS the homepage; no separate (spoofable) url field
+    name: text(data.name, 60) || label,
     description: text(data.description, 200) || "",
     avatar: url(data.avatar),
     feed: url(data.feed),
-    homepage: onDomain(url(data.url)) || `https://${domain}`,
     program: text(data.program, 40),
     socials: sanitizeSocials(data.socials),
     tags,

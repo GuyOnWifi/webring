@@ -4,7 +4,7 @@
 // + widget consume. Runs on cron + on merge. Emits ONLY data; index.html is an app shell.
 import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { ROOT, loadConfig, loadMembers, resolveMember, fetchPosts } from "./lib.mjs";
+import { ROOT, loadConfig, loadMembers, resolveMember, fetchPosts, siteLabel } from "./lib.mjs";
 
 const cfg = await loadConfig();
 const members = await loadMembers();
@@ -21,28 +21,29 @@ let oldFeedRaw = null;
 try {
   oldIndexRaw = await readFile(join(out, "index.json"), "utf8");
   const old = JSON.parse(oldIndexRaw);
-  for (const m of old.members || []) prev[m.domain] = m;
+  for (const m of old.members || []) prev[m.site || m.domain] = m;
 } catch {}
 try {
   oldFeedRaw = await readFile(join(out, "feed.json"), "utf8");
 } catch {}
 
 const resolved = await Promise.all(
-  members.map(async ({ domain }) => {
-    const r = await resolveMember(domain, cfg);
-    const priorFailures = prev[domain]?.failures || 0;
-    if (r.ok) return { domain, ...r.data, source: r.source, ok: true, failures: 0 };
+  members.map(async ({ site }) => {
+    const r = await resolveMember(site, cfg);
+    const p = prev[site] || {};
+    if (r.ok) return { ...r.data, source: r.source, ok: true, failures: 0 };
     return {
-      domain,
-      name: prev[domain]?.name,
-      description: prev[domain]?.description,
-      avatar: prev[domain]?.avatar,
-      homepage: prev[domain]?.homepage,
-      program: prev[domain]?.program,
-      socials: prev[domain]?.socials || {},
-      tags: prev[domain]?.tags || [],
+      site,
+      domain: siteLabel(site),
+      name: p.name,
+      description: p.description,
+      avatar: p.avatar,
+      homepage: p.homepage || site,
+      program: p.program,
+      socials: p.socials || {},
+      tags: p.tags || [],
       ok: false,
-      failures: priorFailures + 1,
+      failures: (p.failures || 0) + 1,
       error: r.error,
     };
   })
@@ -61,7 +62,7 @@ const posts = postLists.flat().sort((a, b) => b.ts - a.ts).slice(0, cfg.feedMaxI
 // Record latest-post timestamp per member (activity signal).
 const lastPostByDomain = {};
 for (const p of posts) if (!lastPostByDomain[p.domain]) lastPostByDomain[p.domain] = p.date;
-for (const m of kept) m.lastPost = lastPostByDomain[m.domain] || prev[m.domain]?.lastPost || null;
+for (const m of kept) m.lastPost = lastPostByDomain[m.domain] || prev[m.site]?.lastPost || null;
 
 const index = {
   ring: { id: cfg.id, name: cfg.name, url: cfg.url, description: cfg.description },

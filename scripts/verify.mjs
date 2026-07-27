@@ -6,7 +6,7 @@
 // This is the human maintainer, replaced by a script.
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { ROOT, loadConfig, loadMembers, resolveMember, suggestFromSite } from "./lib.mjs";
+import { ROOT, loadConfig, loadMembers, resolveMember, suggestFromSite, siteLabel } from "./lib.mjs";
 
 const cfg = await loadConfig();
 const members = await loadMembers();
@@ -18,8 +18,8 @@ const changed = (process.env.CHANGED_FILES || "")
   .map((f) => f.replace(/^members\//, ""));
 const toCheck = changed.length ? members.filter((m) => changed.includes(m.file)) : members;
 
-async function draftSnippet(domain) {
-  const s = await suggestFromSite(domain, cfg);
+async function draftSnippet(site) {
+  const s = await suggestFromSite(site, cfg);
   if (!s.ok) return "";
   return "```json\n" + JSON.stringify({ [cfg.id]: s.block }, null, 2) + "\n```";
 }
@@ -27,55 +27,57 @@ async function draftSnippet(domain) {
 const sections = [];
 let failed = false;
 
-for (const { file, domain } of toCheck) {
-  const r = await resolveMember(domain, cfg);
+for (const { file, site } of toCheck) {
+  const label = siteLabel(site);
+  const manifest = new URL(".well-known/webring.json", site).href;
+  const r = await resolveMember(site, cfg);
 
   if (r.ok && r.source === "well-known") {
-    console.log(`ok   ${file}: ${domain} (well-known)`);
-    sections.push(`### ✅ \`${domain}\`\nFound your \`${cfg.id}\` block in \`/.well-known/webring.json\`. You're in.`);
+    console.log(`ok   ${file}: ${label} (well-known)`);
+    sections.push(`### ✅ \`${label}\`\nFound your \`${cfg.id}\` block. You're in.`);
     continue;
   }
 
   if (r.ok && r.source === "scraped") {
-    // Consent via the widget marker; metadata scraped from the page. Passes, but the
-    // well-known file gives richer, self-authored control, so offer it.
-    console.log(`ok   ${file}: ${domain} (widget marker)`);
-    const snippet = await draftSnippet(domain);
+    // Consent via the widget marker; metadata scraped from the page. Passes, but a
+    // webring.json gives richer, self-authored control, so offer it.
+    console.log(`ok   ${file}: ${label} (widget marker)`);
+    const snippet = await draftSnippet(site);
     sections.push(
-      `### ✅ \`${domain}\`\nVerified via your \`data-webring="${cfg.id}"\` widget, and I scraped your page ` +
+      `### ✅ \`${label}\`\nVerified via your \`data-webring="${cfg.id}"\` widget, and I scraped your page ` +
       `for name, description, and avatar. Want to set those yourself? Drop this at ` +
-      `\`/.well-known/webring.json\` (optional):\n\n${snippet}`
+      `\`${manifest}\` (optional):\n\n${snippet}`
     );
     continue;
   }
 
   // No usable consent signal. Block the merge and hand over a ready-to-paste file.
   failed = true;
-  console.log(`FAIL ${file}: ${domain} (${r.error})`);
-  const snippet = await draftSnippet(domain);
+  console.log(`FAIL ${file}: ${label} (${r.error})`);
+  const snippet = await draftSnippet(site);
   const recheck = "Then re-run this check, or comment `/recheck` on this PR, and I'll take another look.";
 
   if (!snippet) {
     sections.push(
-      `### ❌ \`${domain}\`, couldn't reach your site\n` +
-      `I tried \`https://${domain}/\` but got: \`${r.error}\`. Is it up and served over HTTPS? ` +
+      `### ❌ \`${label}\`, couldn't reach your site\n` +
+      `I tried \`${site}\` but got: \`${r.error}\`. Is it up and served over HTTPS? ` +
       `Once it's reachable, add a \`webring.json\` or the widget. ${recheck}`
     );
   } else if (/not valid JSON/i.test(r.error || "")) {
     sections.push(
-      `### ❌ \`${domain}\`, your \`webring.json\` isn't valid JSON\n` +
-      `I fetched \`https://${domain}/.well-known/webring.json\` but couldn't parse it (\`${r.error}\`). ` +
+      `### ❌ \`${label}\`, your \`webring.json\` isn't valid JSON\n` +
+      `I fetched your \`webring.json\` but couldn't parse it (\`${r.error}\`). ` +
       `Fix the syntax, then keep your \`${cfg.id}\` block. Here's a valid one, prefilled from your ` +
       `page, to model it on:\n\n${snippet}\n${recheck}`
     );
   } else {
     sections.push(
-      `### ❌ \`${domain}\`, no consent signal yet\n` +
-      `👋 Hey! I didn't find a \`${cfg.id}\` block in your \`/.well-known/webring.json\`, and no ` +
-      `\`data-webring="${cfg.id}"\` widget on your homepage. Good news, I read your page's ` +
+      `### ❌ \`${label}\`, no consent signal yet\n` +
+      `👋 Hey! I didn't find a \`${cfg.id}\` block in your \`webring.json\`, and no ` +
+      `\`data-webring="${cfg.id}"\` widget on your page. Good news, I read your page's ` +
       `OpenGraph/h-card tags and drafted one. Pick either:\n\n` +
-      `1. Save this to \`https://${domain}/.well-known/webring.json\`:\n\n${snippet}\n` +
-      `2. Or paste the ring widget (see the README) on your homepage.\n\n${recheck}`
+      `1. Save this to \`${manifest}\`:\n\n${snippet}\n` +
+      `2. Or paste the ring widget (see the README) on your page.\n\n${recheck}`
     );
   }
 }

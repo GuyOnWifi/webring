@@ -15,7 +15,7 @@ function ago(iso?: string | null): string {
   return `${Math.floor(days / 365)}y ago`;
 }
 
-const homeOf = (m: Member) => m.homepage || `https://${m.domain}`;
+const homeOf = (m: Member) => m.homepage || m.site || `https://${m.domain}`;
 
 // GitHub Pages project sites live under /<repo>; prefix asset links so they resolve.
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH || "";

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Member } from "./types";
 
-const homeOf = (m: Member) => m.homepage || `https://${m.domain}`;
+const homeOf = (m: Member) => m.homepage || m.site || `https://${m.domain}`;
 
 // ── ring layout ──
 const NR = 16; // node radius (world units)

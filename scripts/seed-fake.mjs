@@ -93,6 +93,7 @@ for (let i = 0; i < N; i++) {
   const lastPost = new Date(NOW - Math.floor(rnd() * 200) * 86400000).toISOString();
 
   members.push({
+    site: `https://${domain}/`,
     domain,
     name,
     description: `${pick(tags.map((t) => BLURB[t]))}. ${program} @ waterloo.`,

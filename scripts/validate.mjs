@@ -2,7 +2,7 @@
 // network-dependent ownership check. Fast, deterministic, catches malformed entries.
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { ROOT, normalizeDomain, loadConfig } from "./lib.mjs";
+import { ROOT, memberSite, siteLabel, loadConfig } from "./lib.mjs";
 
 const dir = join(ROOT, "members");
 const files = (await readdir(dir)).filter((f) => f.endsWith(".json"));
@@ -24,21 +24,24 @@ for (const f of files) {
     errors.push(`${f}: must be a JSON object.`);
     continue;
   }
-  if (typeof data.domain !== "string" || !data.domain.trim()) {
-    errors.push(`${f}: missing required string field "domain".`);
+  const hasSite = typeof data.site === "string" && data.site.trim();
+  const hasDomain = typeof data.domain === "string" && data.domain.trim();
+  if (!hasSite && !hasDomain) {
+    errors.push(`${f}: needs a "site" URL (e.g. "https://you.com/" or "https://host/~you/") or a bare "domain".`);
     continue;
   }
-  const domain = normalizeDomain(data.domain);
-  if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(domain)) {
-    errors.push(`${f}: "${data.domain}" is not a valid bare domain (e.g. "you.com").`);
+  if (hasDomain && !hasSite && /\/|^https?:/i.test(data.domain)) {
+    errors.push(`${f}: "domain" must be a bare host (no scheme or path). Use "site" for a full URL.`);
   }
-  if (/\/|^https?:/i.test(data.domain)) {
-    errors.push(`${f}: "domain" should be a bare host, no scheme or path.`);
+  const site = memberSite(data);
+  if (!site) {
+    errors.push(`${f}: "${data.site || data.domain}" is not a valid site URL.`);
+    continue;
   }
-  if (seen.has(domain)) {
-    errors.push(`${f}: duplicate domain "${domain}" (also in ${seen.get(domain)}).`);
+  if (seen.has(site)) {
+    errors.push(`${f}: duplicate site "${siteLabel(site)}" (also in ${seen.get(site)}).`);
   } else {
-    seen.set(domain, f);
+    seen.set(site, f);
   }
 }
 
@@ -52,8 +55,9 @@ if (errors.length) {
       `## 🤖 ${cfg.name}, join check\n\n` +
       `I couldn't add you yet. Your member file has a formatting problem:\n\n` +
       errors.map((e) => `- ${e}`).join("\n") +
-      `\n\nThe file should be just \`{ "domain": "you.com" }\` (a bare host, no https:// or ` +
-      `path). Fix it in your PR, then re-run this check or comment \`/recheck\`.\n`;
+      `\n\nThe file should be just \`{ "site": "https://your-site.com/" }\` (a full URL, path ` +
+      `OK), or a bare \`{ "domain": "you.com" }\`. Fix it in your PR, then re-run this check ` +
+      `or comment \`/recheck\`.\n`;
     await writeFile(process.env.PR_COMMENT_FILE, body);
   }
   process.exit(1);

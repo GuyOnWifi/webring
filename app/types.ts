@@ -3,6 +3,7 @@ export type Socials = Partial<
 >;
 
 export type Member = {
+  site: string;
   domain: string;
   name?: string;
   description?: string;
