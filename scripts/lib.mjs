@@ -216,12 +216,20 @@ function sanitize(data, domain) {
   const tags = Array.isArray(data.tags)
     ? data.tags.map((x) => text(x, 24)).filter(Boolean).slice(0, 8)
     : [];
+  // The homepage link must live on the verified host (same host or a subdomain of it).
+  // Paths are fine (e.g. www.student.math.uwaterloo.ca/~you); the host is what's pinned,
+  // so a verified member can't get the ring to link their entry at someone else's site.
+  const onDomain = (u) => {
+    if (!u) return undefined;
+    const h = new URL(u).host;
+    return h === domain || h.endsWith("." + domain) ? u : undefined;
+  };
   return {
     name: text(data.name, 60) || domain,
     description: text(data.description, 200) || "",
     avatar: url(data.avatar),
     feed: url(data.feed),
-    homepage: url(data.url) || `https://${domain}`,
+    homepage: onDomain(url(data.url)) || `https://${domain}`,
     program: text(data.program, 40),
     socials: sanitizeSocials(data.socials),
     tags,
