@@ -3,6 +3,7 @@
   "name": "UW CS Webring",
   "url": "https://guyonwifi.github.io/webring",
   "description": "A self-running webring for the UW CS community.",
+  "autoMergeDelayHours": 24,
   "dropAfterFailures": 3,
   "fetchTimeoutMs": 8000,
   "postsPerSource": 3,

@@ -84,7 +84,8 @@ for (const { file, site } of toCheck) {
 
 const header = failed
   ? `## 🤖 ${cfg.name}, join check\n\nThanks for submitting. A couple of things before I can merge:`
-  : `## 🤖 ${cfg.name}, join check ✅\n\nAll checks passed, merging now. Welcome to the ring.`;
+  : `## 🤖 ${cfg.name}, join check ✅\n\nAll checks passed. I'll merge this in about ${cfg.autoMergeDelayHours || 24}h, ` +
+    `a short window for a maintainer to glance, unless someone adds a \`hold\` label. Nothing more for you to do.`;
 
 await writeFile(process.env.PR_COMMENT_FILE || join(ROOT, "pr-comment.md"), [header, ...sections].join("\n\n") + "\n");
 

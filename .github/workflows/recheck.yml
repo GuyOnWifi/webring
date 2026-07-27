@@ -64,8 +64,19 @@ jobs:
           PR: ${{ github.event.issue.number }}
         run: bash scripts/sticky-comment.sh
 
-      - name: Auto-merge
+      # Mark ready (verify passed + additions-only) for the delayed automerge sweep;
+      # clear the mark on failure. Same net as ci.yml.
+      - name: Mark ready to merge
         if: steps.diff.outputs.safe == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh pr merge '${{ github.event.issue.number }}' --squash --admin
+          PR: ${{ github.event.issue.number }}
+        run: |
+          gh label create ready-to-merge --color 0e8a16 --description "passed checks; merges after the review window" --force >/dev/null 2>&1 || true
+          gh pr edit "$PR" --add-label ready-to-merge
+      - name: Clear ready mark on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.issue.number }}
+        run: gh pr edit "$PR" --remove-label ready-to-merge || true

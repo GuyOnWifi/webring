@@ -1,0 +1,50 @@
+# Delayed auto-merge: the soft review net. ci.yml/recheck.yml label a passing join PR
+# `ready-to-merge` but DON'T merge it. This hourly sweep merges those that have sat the
+# review window (autoMergeDelayHours in ring.config.json), skipping any labelled `hold`
+# and re-confirming they're still additions-only right before merging. A normal join
+# needs no maintainer action; a maintainer objects simply by adding the `hold` label.
+name: automerge
+on:
+  schedule:
+    - cron: "17 * * * *" # hourly, offset from the other jobs
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: automerge
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4 # for ring.config.json
+      - name: Merge PRs past the review window
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh label create ready-to-merge --color 0e8a16 --description "passed checks; merges after the review window" --force >/dev/null 2>&1 || true
+          delay=$(jq -r '.autoMergeDelayHours // 24' ring.config.json)
+          cutoff=$(( delay * 3600 ))
+          now=$(date +%s)
+          gh pr list --state open --label ready-to-merge --json number,labels,headRefOid \
+            --jq '.[] | select([.labels[].name] | index("hold") | not) | [.number, .headRefOid] | @tsv' \
+          | while IFS=$'\t' read -r n sha; do
+              [ -n "$n" ] || continue
+              ts=$(gh api "repos/$REPO/commits/$sha" --jq '.commit.committer.date')
+              age=$(( now - $(date -d "$ts" +%s) ))
+              if [ "$age" -lt "$cutoff" ]; then
+                echo "#$n: ${age}s < ${cutoff}s, still in the review window"; continue
+              fi
+              safe=$(gh api "repos/$REPO/pulls/$n/files" --paginate \
+                | jq -r 'length > 0 and all(.[]; .status == "added" and (.filename | test("^members/[^/]+\\.json$")))')
+              if [ "$safe" != "true" ]; then
+                echo "#$n: no longer additions-only, skipping"; continue
+              fi
+              echo "#$n: window elapsed (${age}s), merging"
+              gh pr merge "$n" --squash --admin || echo "#$n: merge failed"
+            done
