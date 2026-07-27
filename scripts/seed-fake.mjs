@@ -126,7 +126,7 @@ const index = {
     id: "uwcs",
     name: "UW CS Webring",
     url: "https://guyonwifi.github.io/webring",
-    description: "A self-running webring for the UW CS community. No maintainer required.",
+    description: "A self-running webring for the UW CS community.",
   },
   generated: GENERATED,
   count: members.length,

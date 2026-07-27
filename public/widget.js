@@ -1,5 +1,6 @@
-// The self-healing webring widget. Members paste ONE line onto their site, once:
-//   <script src="https://uwcs-ring.vercel.app/widget.js" data-site="your-domain.com"></script>
+// Optional JS variant of the ring widget (the recommended embed is the plain-HTML one
+// in the README — see "How to join"). Members paste ONE line onto their site, once:
+//   <script src="https://guyonwifi.github.io/webring/widget.js" data-site="your-domain.com"></script>
 // It reads the live index.json at load time and renders ← prev | random | next →.
 // Because neighbors are computed from the current index, the ring re-stitches itself
 // when any site dies — members never touch their snippet again.

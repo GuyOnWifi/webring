@@ -47,7 +47,7 @@ async function get(url, timeoutMs, maxBytes) {
 
 // Resolve a member's metadata + prove consent to be in THIS ring.
 // Two valid consent signals (either proves the domain owner opted in):
-//   1. /.well-known/webring.json lists the ring id  (explicit, preferred)
+//   1. /.well-known/webring.json has a block keyed by the ring id  (explicit, preferred)
 //   2. the homepage links back to the ring url        (implicit — the widget snippet does this)
 // Returns { ok, source, data?, error? }.
 export async function resolveMember(domain, cfg) {
@@ -62,30 +62,60 @@ export async function resolveMember(domain, cfg) {
     } catch {
       return { ok: false, error: "well-known file is not valid JSON" };
     }
+    // Namespaced format: each top-level key is a ring id, its value that ring's record.
+    // "$"-prefixed keys are reserved ($shared = defaults merged under every ring block),
+    // so a single well-known file can present differently in each ring it joins.
+    const block = data[cfg.id];
+    if (block && typeof block === "object" && !Array.isArray(block)) {
+      const shared = data.$shared && typeof data.$shared === "object" ? data.$shared : {};
+      return { ok: true, source: "well-known", data: sanitize({ ...shared, ...block }, domain) };
+    }
+    // Legacy flat format: { ...fields, "rings": ["uwcs"] }.
     const rings = Array.isArray(data.rings) ? data.rings : [];
     if (rings.includes(cfg.id)) return { ok: true, source: "well-known", data: sanitize(data, domain) };
-    return { ok: false, error: `well-known does not list ring "${cfg.id}"` };
+    return { ok: false, error: `well-known has no "${cfg.id}" block` };
   }
 
   // 2. Fallback: scrape the homepage. Require a link back to the ring as consent,
   //    then lift metadata from h-card microformats / OpenGraph / <title>.
   const home = await get(`https://${domain}/`, timeout, 512 * 1024);
   if (!home.ok) return { ok: false, error: home.error };
-  if (!linksToRing(home.raw, cfg.url)) {
-    return { ok: false, error: `no well-known file and homepage does not link to ${cfg.url}` };
+  if (!hasWidget(home.raw, cfg)) {
+    return { ok: false, error: `no well-known file and no "${cfg.id}" webring widget on the homepage` };
   }
   return { ok: true, source: "scraped", data: sanitize(scrapeMeta(home.raw, domain), domain) };
 }
 
-// Consent check: does the page contain a link/script pointing at the ring origin?
-function linksToRing(html, ringUrl) {
-  let origin;
-  try {
-    origin = new URL(ringUrl).origin;
-  } catch {
-    return false;
-  }
-  return html.includes(origin);
+// For the join bot: build a ready-to-paste ring block from whatever we can scrape
+// off the homepage (OG/h-card). Used to *suggest* a webring.json when none exists —
+// no consent link-back required, since this only drafts a suggestion, grants nothing.
+// Returns { ok, block } or { ok:false, error }.
+export async function suggestFromSite(domain, cfg) {
+  const home = await get(`https://${domain}/`, cfg.fetchTimeoutMs, 512 * 1024);
+  if (!home.ok) return { ok: false, error: home.error };
+  const m = sanitize(scrapeMeta(home.raw, domain), domain);
+  const block = {
+    name: m.name,
+    description: m.description || "one line about you",
+    url: m.homepage,
+    ...(m.avatar ? { avatar: m.avatar } : {}),
+    ...(m.feed ? { feed: m.feed } : {}),
+    ...(m.program ? { program: m.program } : {}),
+    ...(Object.keys(m.socials).length ? { socials: m.socials } : {}),
+    tags: m.tags.length ? m.tags : ["add", "some", "tags"],
+  };
+  return { ok: true, block };
+}
+
+// Consent check: the homepage must embed the ring widget, identified by its
+// `data-webring` marker naming this ring. That marker is the deliberate opt-in.
+function hasWidget(html, cfg) {
+  const marker = new RegExp(`data-webring\\s*=\\s*["'][^"']*\\b${escapeRe(cfg.id)}\\b[^"']*["']`, "i");
+  return marker.test(html);
+}
+
+function escapeRe(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 // Best-effort metadata from raw HTML — h-card (microformats2) first, then OpenGraph,

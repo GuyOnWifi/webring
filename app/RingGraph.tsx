@@ -500,13 +500,13 @@ export default function RingGraph({
             <span className={`h-1.5 w-1.5 rounded-full ${tip.ok ? "bg-emerald-400" : "bg-[#e5534b]"}`} />
             {tip.name}
           </div>
-          <div className="mt-0.5 whitespace-nowrap text-[11px] text-dim">{tip.domain} · ↗ click to visit</div>
+          <div className="mt-0.5 whitespace-nowrap text-[11px] text-dim">{tip.domain} ↗ click to visit</div>
         </div>
       )}
 
       {/* persistent affordance so the graph reads as interactive at a glance */}
       <div className="pointer-events-none absolute bottom-2.5 right-3 z-10 text-[11px] text-dim/70">
-        drag people · scroll · <span className="text-dim">click a node to visit</span>
+        drag people, scroll, <span className="text-dim">click a node to visit</span>
       </div>
     </div>
   );

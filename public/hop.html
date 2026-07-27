@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex" />
+  <title>uw cs webring — hop</title>
+  <style>
+    html { color-scheme: light dark; }
+    body { font: 15px system-ui, sans-serif; margin: 0; display: grid; place-items: center; min-height: 100vh; }
+  </style>
+</head>
+<body>
+  <p id="msg">hopping…</p>
+  <script>
+    // Self-healing ring navigation. The member's widget links here with a stable
+    // ?from=<their-domain>&nav=prev|next — we resolve the *current* neighbour from the
+    // live index at click time, so the ring re-stitches itself as sites come and go.
+    (async function () {
+      var p = new URLSearchParams(location.search);
+      var from = (p.get("from") || "").toLowerCase().replace(/^https?:\/\//, "").replace(/\/+$/, "");
+      var step = p.get("nav") === "prev" ? -1 : 1;
+      var home = "./"; // ring homepage, relative to this file's base
+      try {
+        var res = await fetch("./index.json", { cache: "no-store" });
+        var data = await res.json();
+        var live = (data.members || []).filter(function (m) { return m.ok; });
+        if (!live.length) return location.replace(home);
+        var i = live.findIndex(function (m) { return m.domain === from; });
+        if (i < 0) i = 0; // unknown/absent site → start from the top
+        var target = live[(i + step + live.length) % live.length];
+        location.replace(target.homepage || "https://" + target.domain);
+      } catch (e) {
+        location.replace(home);
+      }
+    })();
+  </script>
+  <noscript>This ring hop needs JavaScript. <a href="./">Visit the ring directory.</a></noscript>
+</body>
+</html>
