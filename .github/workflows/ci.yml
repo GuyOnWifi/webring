@@ -31,24 +31,23 @@ jobs:
         with:
           node-version: 22
 
-      # Bring in the PR as DATA only. Fetch its head, compute the changed-file list for
-      # the guard, then check out solely the members/ path from it. The `-- members/`
+      # Bring in the PR as DATA only. Get the changed files (+ their status) from the API,
+      # then check out solely the members/ path from the PR head. The `-- members/`
       # pathspec confines the write to that directory; scripts/, package.json, and
       # .github/ stay at the trusted base version.
       - name: Pull PR member data
         id: diff
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          base='${{ github.event.pull_request.base.sha }}'
-          git fetch origin "$base" --depth=1
-          git fetch origin "pull/${{ github.event.pull_request.number }}/head:pr" --depth=1
-          files=$(git diff --name-only "$base" pr)
-          echo "files=$(echo "$files" | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
-          if echo "$files" | grep -qv -e '^members/.*\.json$' -e '^$'; then
-            echo "safe=false" >> "$GITHUB_OUTPUT"
-            echo "PR touches non-member files:"; echo "$files" | grep -v -e '^members/.*\.json$' -e '^$'
-          else
-            echo "safe=true" >> "$GITHUB_OUTPUT"
-          fi
+          pr='${{ github.event.pull_request.number }}'
+          files_json=$(gh api "repos/${{ github.repository }}/pulls/$pr/files" --paginate)
+          echo "files=$(echo "$files_json" | jq -r '.[].filename' | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
+          # Auto-merge ONLY pure additions of member files. Editing, deleting, or renaming
+          # an existing entry (or touching any non-member file) drops to human review, so a
+          # PR can't grief someone else's file.
+          echo "safe=$(echo "$files_json" | jq -r 'length > 0 and all(.[]; .status == "added" and (.filename | test("^members/[^/]+\\.json$")))')" >> "$GITHUB_OUTPUT"
+          git fetch origin "pull/$pr/head:pr" --depth=1
           git checkout pr -- members/
 
       # Trusted scripts (base branch), run against the PR's member data. No deps needed.

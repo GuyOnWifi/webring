@@ -37,13 +37,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           pr='${{ github.event.issue.number }}'
-          files=$(gh pr diff "$pr" --name-only)
-          echo "files=$(echo "$files" | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
-          if echo "$files" | grep -qv -e '^members/.*\.json$' -e '^$'; then
-            echo "safe=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "safe=true" >> "$GITHUB_OUTPUT"
-          fi
+          files_json=$(gh api "repos/${{ github.repository }}/pulls/$pr/files" --paginate)
+          echo "files=$(echo "$files_json" | jq -r '.[].filename' | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
+          # Auto-merge ONLY pure additions of member files (same guard as ci.yml).
+          echo "safe=$(echo "$files_json" | jq -r 'length > 0 and all(.[]; .status == "added" and (.filename | test("^members/[^/]+\\.json$")))')" >> "$GITHUB_OUTPUT"
           git fetch origin "pull/$pr/head:pr" --depth=1
           git checkout pr -- members/
 
