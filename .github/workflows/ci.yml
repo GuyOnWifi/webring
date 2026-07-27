@@ -1,5 +1,11 @@
-# Runs on every PR. Validates member files, lints/typechecks the site, verifies
-# domain ownership, and auto-merges members-only PRs. No human maintainer in the loop.
+# Runs on every PR. Validates the member file, verifies domain ownership, comments the
+# result, and auto-merges members-only PRs. No human maintainer in the loop.
+#
+# SECURITY: this uses pull_request_target, so it runs with a write-scoped token and repo
+# secrets. It MUST NOT execute any code from the PR. We check out the trusted BASE branch
+# for all scripts, pull in ONLY the PR's members/*.json (data, parsed not executed), and
+# never run `npm ci`/lint/build on PR code. validate.mjs + verify.mjs use only Node
+# built-ins, so there is nothing to install and no postinstall hook can run.
 name: ci
 on:
   pull_request_target:
@@ -9,45 +15,56 @@ permissions:
   contents: write
   pull-requests: write
 
+concurrency:
+  group: ci-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   ci:
     runs-on: ubuntu-latest
     steps:
+      # Trusted checkout: the BASE branch. Note there is NO `ref: head.sha` here, so the
+      # scripts we run are ours, not the PR author's.
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci
 
-      # Fast, deterministic checks (no network).
-      - name: Validate member JSON
-        run: npm run validate
-      - name: Lint
-        run: npm run lint
-      - name: Typecheck
-        run: npm run typecheck
-      - name: Build site (smoke test)
-        run: npm run build
-
-      # Network: only verify ownership for member files this PR changed.
-      - name: Changed files
+      # Bring in the PR as DATA only. Fetch its head, compute the changed-file list for
+      # the guard, then check out solely the members/ path from it. The `-- members/`
+      # pathspec confines the write to that directory; scripts/, package.json, and
+      # .github/ stay at the trusted base version.
+      - name: Pull PR member data
         id: diff
         run: |
-          git fetch origin ${{ github.event.pull_request.base.sha }} --depth=1
-          echo "files=$(git diff --name-only ${{ github.event.pull_request.base.sha }} HEAD | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
+          base='${{ github.event.pull_request.base.sha }}'
+          git fetch origin "$base" --depth=1
+          git fetch origin "pull/${{ github.event.pull_request.number }}/head:pr" --depth=1
+          files=$(git diff --name-only "$base" pr)
+          echo "files=$(echo "$files" | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
+          if echo "$files" | grep -qv -e '^members/.*\.json$' -e '^$'; then
+            echo "safe=false" >> "$GITHUB_OUTPUT"
+            echo "PR touches non-member files:"; echo "$files" | grep -v -e '^members/.*\.json$' -e '^$'
+          else
+            echo "safe=true" >> "$GITHUB_OUTPUT"
+          fi
+          git checkout pr -- members/
+
+      # Trusted scripts (base branch), run against the PR's member data. No deps needed.
+      - name: Validate member JSON
+        run: node scripts/validate.mjs
+
       - name: Verify domain ownership (+ draft suggestion)
         id: verify
         env:
           CHANGED_FILES: ${{ steps.diff.outputs.files }}
           PR_COMMENT_FILE: pr-comment.md
-        run: npm run verify
+        run: node scripts/verify.mjs
 
       # Always post the bot's findings on the PR thread, pass or fail. On failure the
-      # verify step exits non-zero, so guard/auto-merge are skipped, but this still runs
-      # and tells the submitter exactly what to fix (with a ready-to-paste suggestion).
+      # verify step exits non-zero, so auto-merge is skipped, but this still runs and
+      # tells the submitter exactly what to fix (with a ready-to-paste suggestion).
       - name: Comment on PR
         if: always() && hashFiles('pr-comment.md') != ''
         env:
@@ -57,15 +74,9 @@ jobs:
           gh pr comment "$PR" --body-file pr-comment.md --edit-last \
             || gh pr comment "$PR" --body-file pr-comment.md
 
-      # Auto-merge only if the PR touches nothing but members/*.json.
-      - name: Guard, members-only PR
-        id: guard
-        run: |
-          BAD=$(git diff --name-only ${{ github.event.pull_request.base.sha }} HEAD | grep -v '^members/.*\.json$' || true)
-          if [ -n "$BAD" ]; then echo "Touches non-member files:"; echo "$BAD"; echo "safe=false" >> "$GITHUB_OUTPUT";
-          else echo "safe=true" >> "$GITHUB_OUTPUT"; fi
+      # Auto-merge only if verify passed (implicit success()) and the PR is members-only.
       - name: Auto-merge
-        if: steps.guard.outputs.safe == 'true'
+        if: steps.diff.outputs.safe == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh pr merge ${{ github.event.pull_request.number }} --squash --admin
