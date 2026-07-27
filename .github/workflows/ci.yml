@@ -67,12 +67,13 @@ jobs:
       # Always post the bot's findings on the PR thread, pass or fail. On failure the
       # verify step exits non-zero, so auto-merge is skipped, but this still runs and
       # tells the submitter exactly what to fix (with a ready-to-paste suggestion).
-      - name: Comment on PR
+      - name: Comment on PR (sticky)
         if: always() && hashFiles('pr-comment.md') != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
-        run: gh pr comment "$PR" --body-file pr-comment.md
+        run: bash scripts/sticky-comment.sh
 
       # Auto-merge only if verify passed (implicit success()) and the PR is members-only.
       - name: Auto-merge

@@ -59,11 +59,13 @@ jobs:
           PR_COMMENT_FILE: pr-comment.md
         run: node scripts/verify.mjs
 
-      - name: Comment on PR
+      - name: Comment on PR (sticky)
         if: always() && hashFiles('pr-comment.md') != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh pr comment '${{ github.event.issue.number }}' --body-file pr-comment.md
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.issue.number }}
+        run: bash scripts/sticky-comment.sh
 
       - name: Auto-merge
         if: steps.diff.outputs.safe == 'true'
