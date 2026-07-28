@@ -5,7 +5,7 @@
     "url": "https://guyonwifi.github.io/webring",
     "description": "A self-running webring for the UW CS community."
   },
-  "generated": "2026-07-28T02:45:21.201Z",
+  "generated": "2026-07-28T08:39:16.196Z",
   "count": 1,
   "tags": [
     "rust",
@@ -16,19 +16,18 @@
     {
       "site": "https://web.easonhuang.dev/",
       "domain": "web.easonhuang.dev",
-      "homepage": "https://web.easonhuang.dev/",
       "name": "Ada's Test Site",
       "description": "testing the uw cs webring join bot",
       "avatar": "https://web.easonhuang.dev/avatar.png",
-      "feed": "https://web.easonhuang.dev/index.xml",
+      "homepage": "https://web.easonhuang.dev/",
       "socials": {},
       "tags": [
         "rust",
         "systems"
       ],
-      "source": "well-known",
-      "ok": true,
-      "failures": 0,
+      "ok": false,
+      "failures": 1,
+      "error": "HTTP 403",
       "lastPost": null
     }
   ]
