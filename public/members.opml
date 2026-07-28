@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <opml version="2.0">
-  <head><title>UW CS Webring feeds</title><dateCreated>2026-07-27T21:15:26.621Z</dateCreated></head>
+  <head><title>UW CS Webring feeds</title><dateCreated>2026-07-28T02:45:21.201Z</dateCreated></head>
   <body>
-
+    <outline type="rss" text="Ada&#39;s Test Site" title="Ada&#39;s Test Site" xmlUrl="https://web.easonhuang.dev/index.xml" htmlUrl="https://web.easonhuang.dev/"/>
   </body>
 </opml>
