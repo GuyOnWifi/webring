@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/">
   <channel>
-    <title>UW CS Webring — Planet</title>
+    <title>UW CS Webring, Planet</title>
     <link>https://guyonwifi.github.io/webring</link>
     <description>A self-running webring for the UW CS community.</description>
     <lastBuildDate>2026-07-29T14:17:10.555Z</lastBuildDate>
