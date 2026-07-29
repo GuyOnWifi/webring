@@ -5,9 +5,21 @@
     "url": "https://guyonwifi.github.io/webring",
     "description": "A self-running webring for the UW CS community."
   },
-  "generated": "2026-07-29T14:17:10.555Z",
-  "count": 0,
+  "generated": "2026-07-29T15:31:22.191Z",
+  "count": 1,
   "tags": [],
   "programs": [],
-  "members": []
+  "members": [
+    {
+      "site": "https://web.easonhuang.dev/",
+      "domain": "web.easonhuang.dev",
+      "homepage": "https://web.easonhuang.dev/",
+      "socials": {},
+      "tags": [],
+      "ok": false,
+      "failures": 1,
+      "error": "couldn't read .well-known/webring.json (HTTP 502)",
+      "lastPost": null
+    }
+  ]
 }
