@@ -1,6 +1,6 @@
 // Structural validation of members/*.json — runs in CI on every PR, before the
 // network-dependent ownership check. Fast, deterministic, catches malformed entries.
-import { readdir, readFile, writeFile } from "node:fs/promises";
+import { readdir, readFile, writeFile, lstat } from "node:fs/promises";
 import { join } from "node:path";
 import { ROOT, memberSite, siteLabel, loadConfig } from "./lib.mjs";
 
@@ -9,15 +9,32 @@ const files = (await readdir(dir)).filter((f) => f.endsWith(".json"));
 const seen = new Map();
 const errors = [];
 
+const MAX_FILE_BYTES = 4096;
+
 for (const f of files) {
   if (!/^[a-z0-9-]+\.json$/.test(f)) {
     errors.push(`${f}: filename must be kebab-case (a-z, 0-9, -).`);
   }
+  // Must be a regular file. CI pulls in members/ from the PR head, and git happily
+  // carries a symlink as an added blob — the files API still reports it as `added` with
+  // a .json name, so the additions-only merge guard never sees it. Reading through one
+  // would let a PR aim our parser at an arbitrary path on the runner.
+  const st = await lstat(join(dir, f));
+  if (!st.isFile()) {
+    errors.push(`${f}: must be a regular file (symlinks and directories are not allowed).`);
+    continue;
+  }
+  if (st.size > MAX_FILE_BYTES) {
+    errors.push(`${f}: is ${st.size} bytes; a member file should be well under ${MAX_FILE_BYTES}.`);
+    continue;
+  }
   let data;
   try {
     data = JSON.parse(await readFile(join(dir, f), "utf8"));
-  } catch (e) {
-    errors.push(`${f}: invalid JSON: ${e.message}`);
+  } catch {
+    // Deliberately no parser message: Node embeds the first bytes of the input in it,
+    // and this string gets posted to a public PR comment.
+    errors.push(`${f}: is not valid JSON.`);
     continue;
   }
   if (typeof data !== "object" || data === null || Array.isArray(data)) {

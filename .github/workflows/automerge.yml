@@ -28,20 +28,35 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           gh label create ready-to-merge --color 0e8a16 --description "passed checks; merges after the review window" --force >/dev/null 2>&1 || true
+          # `hold` is the brake, so it must exist BEFORE anyone reaches for it: nothing
+          # else creates it, and `gh pr edit --add-label hold` fails outright on a label
+          # that isn't defined. Ensuring it here (hourly, unconditionally) means the
+          # objection path is always available, including in a fresh fork.
+          gh label create hold --color b60205 --description "maintainer objection; blocks auto-merge" --force >/dev/null 2>&1 || true
           delay=$(jq -r '.autoMergeDelayHours // 24' ring.config.json)
           cutoff=$(( delay * 3600 ))
           now=$(date +%s)
-          gh pr list --state open --label ready-to-merge --json number,labels,headRefOid \
-            --jq '.[] | select([.labels[].name] | index("hold") | not) | [.number, .headRefOid] | @tsv' \
-          | while IFS=$'\t' read -r n sha; do
+          gh pr list --state open --label ready-to-merge --json number,labels \
+            --jq '.[] | select([.labels[].name] | index("hold") | not) | .number' \
+          | while read -r n; do
               [ -n "$n" ] || continue
-              ts=$(gh api "repos/$REPO/commits/$sha" --jq '.commit.committer.date')
+              # Age the PR by when WE applied `ready-to-merge`, taken from the issue
+              # timeline. The commit's committer date is written by the submitter's git
+              # client, so timing the window off it let anyone backdate a commit and skip
+              # the review window entirely. Timeline events are stamped by GitHub, and
+              # keying off the label also restarts the clock whenever a force-push clears
+              # and re-earns it.
+              ts=$(gh api "repos/$REPO/issues/$n/timeline" --paginate \
+                --jq '[.[] | select(.event == "labeled" and .label.name == "ready-to-merge") | .created_at] | last // empty')
+              if [ -z "$ts" ]; then
+                echo "#$n: no ready-to-merge label event, skipping"; continue
+              fi
               age=$(( now - $(date -d "$ts" +%s) ))
               if [ "$age" -lt "$cutoff" ]; then
                 echo "#$n: ${age}s < ${cutoff}s, still in the review window"; continue
               fi
               safe=$(gh api "repos/$REPO/pulls/$n/files" --paginate \
-                | jq -r 'length > 0 and all(.[]; .status == "added" and (.filename | test("^members/[^/]+\\.json$")))')
+                | jq -r 'length > 0 and length <= 3 and all(.[]; .status == "added" and (.filename | test("^members/[^/]+\\.json$")))')
               if [ "$safe" != "true" ]; then
                 echo "#$n: no longer additions-only, skipping"; continue
               fi

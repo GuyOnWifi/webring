@@ -2,6 +2,12 @@
   "name": "uwcs-webring",
   "version": "0.1.0",
   "private": true,
+  "description": "A self-running webring for the UW CS community: static site plus GitHub Actions bots, no maintainer required.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/GuyOnWifi/webring"
+  },
   "type": "module",
   "scripts": {
     "scrape": "node scripts/build.mjs",
@@ -17,6 +23,13 @@
     "next": "^15.1.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
+  },
+  "comments": {
+    "overrides": "Transitive deps of next with published security fixes that next itself hasn't picked up yet. postcss is build-time only (arbitrary .map read via sourceMappingURL); sharp is pulled in for image optimization, which this static export disables outright."
+  },
+  "overrides": {
+    "postcss": "^8.5.23",
+    "sharp": "^0.35.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.0.0",

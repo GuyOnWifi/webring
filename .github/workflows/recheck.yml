@@ -39,8 +39,11 @@ jobs:
           pr='${{ github.event.issue.number }}'
           files_json=$(gh api "repos/${{ github.repository }}/pulls/$pr/files" --paginate)
           echo "files=$(echo "$files_json" | jq -r '.[].filename' | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
-          # Auto-merge ONLY pure additions of member files (same guard as ci.yml).
-          echo "safe=$(echo "$files_json" | jq -r 'length > 0 and all(.[]; .status == "added" and (.filename | test("^members/[^/]+\\.json$")))')" >> "$GITHUB_OUTPUT"
+          # Ownership + dedup guard, identical to ci.yml: the sole change must be an added
+          # members/<author-login>.json.
+          author=$(gh pr view "$pr" --json author --jq '.author.login' | tr '[:upper:]' '[:lower:]')
+          echo "author=$author" >> "$GITHUB_OUTPUT"
+          echo "safe=$(echo "$files_json" | jq --arg f "members/${author}.json" -r 'length > 0 and all(.[]; .filename == $f and .status == "added")')" >> "$GITHUB_OUTPUT"
           git fetch origin "pull/$pr/head:pr" --depth=1
           git checkout pr -- members/
 
@@ -54,6 +57,8 @@ jobs:
         env:
           CHANGED_FILES: ${{ steps.diff.outputs.files }}
           PR_COMMENT_FILE: pr-comment.md
+          PR_SAFE: ${{ steps.diff.outputs.safe }}
+          PR_AUTHOR: ${{ steps.diff.outputs.author }}
         run: node scripts/verify.mjs
 
       - name: Comment on PR (sticky)
@@ -73,9 +78,12 @@ jobs:
           PR: ${{ github.event.issue.number }}
         run: |
           gh label create ready-to-merge --color 0e8a16 --description "passed checks; merges after the review window" --force >/dev/null 2>&1 || true
+          # Same as ci.yml: guarantee the brake exists for PRs on the merge track.
+          gh label create hold --color b60205 --description "maintainer objection; blocks auto-merge" --force >/dev/null 2>&1 || true
           gh pr edit "$PR" --add-label ready-to-merge
-      - name: Clear ready mark on failure
-        if: failure()
+      # Clear whenever this run didn't earn the mark (failed, or no longer additions-only).
+      - name: Clear ready mark
+        if: always() && (failure() || steps.diff.outputs.safe != 'true')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR: ${{ github.event.issue.number }}

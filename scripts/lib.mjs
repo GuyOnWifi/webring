@@ -1,11 +1,14 @@
-// Shared helpers: read config/members, resolve a member's metadata (well-known
-// first, h-card/OpenGraph fallback), and parse their feed for the planet river.
+// Shared helpers: read config/members, resolve a member's metadata from their
+// well-known manifest, and parse their feed for the planet river.
 import { readFile, readdir } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
 
 export const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const UA = { "user-agent": "webring-builder/0.1 (+https://github.com)" };
+const MAX_REDIRECTS = 5;
 
 export async function loadConfig() {
   return JSON.parse(await readFile(join(ROOT, "ring.config.json"), "utf8"));
@@ -31,9 +34,19 @@ export async function loadMembers() {
 // Canonical site URL for a member: https, no query/hash, trailing slash (so relative
 // lookups like ".well-known/webring.json" resolve UNDER the path). Accepts a bare host
 // or a full URL in `site`. Returns null if `site` is missing or unparseable.
+//
+// The scheme is always normalized to https, never merely defaulted. Keeping an
+// author-supplied "http://" would (a) let the same site register twice under one
+// `domain` label, colliding in the directory, the planet, and hop.html, and (b) put
+// the verification fetch on a cleartext channel any network hop could forge.
 export function memberSite(data) {
   let raw = typeof data.site === "string" && data.site.trim() ? data.site.trim() : null;
   if (!raw) return null;
+  // Reject an explicit non-http(s) scheme instead of prefixing https:// onto it, which
+  // would silently reinterpret "ftp://a.com" as the host "ftp" with the path "//a.com".
+  // A bare "host:port" is scheme-shaped too, so allow that one form through.
+  const scheme = raw.match(/^([a-z][a-z0-9+.-]*):/i);
+  if (scheme && !/^https?$/i.test(scheme[1]) && !/^[a-z][a-z0-9+.-]*:\d+(\/|$)/i.test(raw)) return null;
   if (!/^https?:\/\//i.test(raw)) raw = `https://${raw}`;
   let u;
   try {
@@ -42,8 +55,11 @@ export function memberSite(data) {
     return null;
   }
   if (u.protocol !== "https:" && u.protocol !== "http:") return null;
+  u.protocol = "https:";
   u.hash = "";
   u.search = "";
+  u.username = "";
+  u.password = "";
   if (!u.pathname.endsWith("/")) u.pathname += "/";
   return u.href;
 }
@@ -58,15 +74,110 @@ export function siteLabel(site) {
   }
 }
 
+// Is this literal IP address something we must never fetch? Anything that isn't a
+// public unicast address: loopback, RFC1918, link-local (incl. the 169.254.169.254
+// cloud metadata endpoint), CGNAT, unique-local v6, multicast, reserved.
+function isPrivateIp(ip) {
+  const v = isIP(ip);
+  if (v === 4) {
+    const [a, b] = ip.split(".").map(Number);
+    if (a === 0 || a === 10 || a === 127) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 169 && b === 254) return true;
+    if (a === 100 && b >= 64 && b <= 127) return true;
+    if (a >= 224) return true;
+    return false;
+  }
+  if (v === 6) {
+    const s = ip.toLowerCase().replace(/^\[|\]$/g, "");
+    if (s === "::" || s === "::1") return true;
+    if (/^fe[89ab]/.test(s)) return true; // link-local
+    if (/^f[cd]/.test(s)) return true; // unique-local
+    if (/^ff/.test(s)) return true; // multicast
+    const mapped = s.match(/(\d+\.\d+\.\d+\.\d+)$/); // ::ffff:10.0.0.1 and friends
+    if (mapped) return isPrivateIp(mapped[1]);
+    return false;
+  }
+  return true; // not an address we understand — refuse rather than guess
+}
+
+// Member-supplied URLs are fetched by CI with a write-scoped token in the environment,
+// and what comes back is echoed into a public PR comment. Resolve the host first and
+// refuse anything that points inside the runner's network, so a member file can't be
+// used to probe or exfiltrate internal services. Throws on refusal.
+//
+// Residual risk: a hostile DNS server could answer this lookup publicly and the
+// subsequent connect privately (rebinding). Closing that needs pinning the connection
+// to the vetted address via a custom agent; the ranges below stop the direct attempt.
+async function assertPublicUrl(u) {
+  const host = u.hostname.replace(/^\[|\]$/g, "");
+  if (isIP(host)) {
+    if (isPrivateIp(host)) throw new Error(`refusing to fetch a private address (${host})`);
+    return;
+  }
+  let addrs;
+  try {
+    addrs = await lookup(host, { all: true });
+  } catch {
+    throw new Error(`DNS lookup failed for ${host}`);
+  }
+  if (!addrs.length) throw new Error(`DNS lookup failed for ${host}`);
+  for (const a of addrs) {
+    if (isPrivateIp(a.address)) {
+      throw new Error(`refusing to fetch a private address (${host} resolves to ${a.address})`);
+    }
+  }
+}
+
+// Read the body with the cap applied DURING transfer, not after. `res.text()` would
+// buffer the whole response first, so a member serving an endless stream could exhaust
+// the runner regardless of maxBytes; here we bail the moment we cross the limit.
+async function readCapped(res, maxBytes) {
+  if (!res.body) return { ok: true, raw: "" };
+  const reader = res.body.getReader();
+  const chunks = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > maxBytes) {
+      await reader.cancel().catch(() => {});
+      return { ok: false, error: "response too large" };
+    }
+    chunks.push(value);
+  }
+  return { ok: true, raw: Buffer.concat(chunks).toString("utf8") };
+}
+
+// Fetch over https only, following redirects by hand so every hop is re-checked
+// against assertPublicUrl (a public host is otherwise free to 302 into the private
+// range, which `redirect: "follow"` would chase without a word).
 async function get(url, timeoutMs, maxBytes) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await fetch(url, { signal: ctrl.signal, redirect: "follow", headers: UA });
-    if (!res.ok) return { ok: false, status: res.status, error: `HTTP ${res.status}` };
-    const raw = await res.text();
-    if (raw.length > maxBytes) return { ok: false, error: "response too large" };
-    return { ok: true, raw };
+    let current = url;
+    for (let hop = 0; ; hop++) {
+      let u;
+      try {
+        u = new URL(current);
+      } catch {
+        return { ok: false, error: "bad URL" };
+      }
+      if (u.protocol !== "https:") return { ok: false, error: `refusing non-https URL (${u.protocol}//)` };
+      await assertPublicUrl(u);
+      const res = await fetch(u, { signal: ctrl.signal, redirect: "manual", headers: UA });
+      const location = res.headers.get("location");
+      if (res.status >= 300 && res.status < 400 && location) {
+        if (hop >= MAX_REDIRECTS) return { ok: false, error: "too many redirects" };
+        current = new URL(location, u).href;
+        continue;
+      }
+      if (!res.ok) return { ok: false, status: res.status, error: `HTTP ${res.status}` };
+      return await readCapped(res, maxBytes);
+    }
   } catch (e) {
     return { ok: false, error: e.name === "AbortError" ? "timed out" : String(e.message || e) };
   } finally {
@@ -74,46 +185,51 @@ async function get(url, timeoutMs, maxBytes) {
   }
 }
 
-// Resolve a member's metadata + prove consent, everything relative to their site URL
-// (which may include a path like https://host/~you/). Consent signals:
-//   1. a webring.json with a block keyed by the ring id, checked at <site>.well-known/
-//      first (proper convention; for apex sites that's the origin root), then
-//      <site>webring.json (a plain file path-scoped sites can actually write). Preferred.
-//   2. the data-webring widget marker on the page itself.
+// Resolve a member's metadata + prove consent. The ONLY consent signal is a manifest
+// at <site>.well-known/webring.json carrying a block keyed by the ring id (for an apex
+// site that's the origin root; for path hosting like https://host/~you/ it sits under
+// the path). Writing a file at a specific path is something only the site's owner can
+// do, which is exactly the property consent needs.
+//
+// The `data-webring` widget marker deliberately does NOT grant consent: it's a plain
+// substring of the page, so any site that renders user-submitted content (comments,
+// forums, wikis, pastes) can be made to carry it by someone who doesn't own it. The
+// widget is a membership requirement, checked separately and non-blockingly by
+// hasWidgetOnSite; it is not an ownership proof.
 // Returns { ok, source, data?, error? }.
 export async function resolveMember(site, cfg) {
-  const timeout = cfg.fetchTimeoutMs;
+  const wk = await get(new URL(".well-known/webring.json", site).href, cfg.fetchTimeoutMs, 64 * 1024);
+  if (!wk.ok) return { ok: false, error: `couldn't read .well-known/webring.json (${wk.error})` };
 
-  // 1. Manifest, relative to the site URL.
-  for (const rel of [".well-known/webring.json", "webring.json"]) {
-    const wk = await get(new URL(rel, site).href, timeout, 64 * 1024);
-    if (!wk.ok) continue;
-    let data;
-    try {
-      data = JSON.parse(wk.raw);
-    } catch {
-      return { ok: false, error: "webring.json is not valid JSON" };
-    }
-    // Namespaced: each top-level key is a ring id; "$"-prefixed keys are reserved
-    // ($shared merges under every ring block), so one file can serve many rings.
-    const block = data[cfg.id];
-    if (block && typeof block === "object" && !Array.isArray(block)) {
-      const shared = data.$shared && typeof data.$shared === "object" ? data.$shared : {};
-      return { ok: true, source: "well-known", data: sanitize({ ...shared, ...block }, site) };
-    }
-    // Legacy flat format: { ...fields, "rings": ["uwcs"] }.
-    const rings = Array.isArray(data.rings) ? data.rings : [];
-    if (rings.includes(cfg.id)) return { ok: true, source: "well-known", data: sanitize(data, site) };
-    return { ok: false, error: `webring.json has no "${cfg.id}" block` };
+  let data;
+  try {
+    data = JSON.parse(wk.raw);
+  } catch {
+    return { ok: false, error: "webring.json is not valid JSON" };
+  }
+  if (typeof data !== "object" || data === null || Array.isArray(data)) {
+    return { ok: false, error: "webring.json is not valid JSON" };
   }
 
-  // 2. Fallback: the widget marker on the page itself.
-  const home = await get(site, timeout, 512 * 1024);
+  // Namespaced: each top-level key is a ring id; "$"-prefixed keys are reserved
+  // ($shared merges under every ring block), so one file can serve many rings.
+  const block = data[cfg.id];
+  if (block && typeof block === "object" && !Array.isArray(block)) {
+    const shared = data.$shared && typeof data.$shared === "object" ? data.$shared : {};
+    return { ok: true, source: "well-known", data: sanitize({ ...shared, ...block }, site) };
+  }
+  // Legacy flat format: { ...fields, "rings": ["uwcs"] }.
+  const rings = Array.isArray(data.rings) ? data.rings : [];
+  if (rings.includes(cfg.id)) return { ok: true, source: "well-known", data: sanitize(data, site) };
+  return { ok: false, error: `webring.json has no "${cfg.id}" block` };
+}
+
+// Membership check, not an ownership proof: is the ring widget actually on the page?
+// Reported to the submitter as a reminder; it never decides whether a PR can merge.
+export async function hasWidgetOnSite(site, cfg) {
+  const home = await get(site, cfg.fetchTimeoutMs, 512 * 1024);
   if (!home.ok) return { ok: false, error: home.error };
-  if (!hasWidget(home.raw, cfg)) {
-    return { ok: false, error: `no webring.json and no "${cfg.id}" widget at ${siteLabel(site)}` };
-  }
-  return { ok: true, source: "scraped", data: sanitize(scrapeMeta(home.raw, site), site) };
+  return { ok: true, present: hasWidget(home.raw, cfg) };
 }
 
 // For the join bot: build a ready-to-paste ring block from whatever we can scrape
@@ -232,11 +348,27 @@ function sanitizeSocials(raw) {
 function sanitize(data, site) {
   const text = (v, max) =>
     typeof v === "string" ? v.replace(/<[^>]*>/g, "").trim().slice(0, max) : undefined;
+
+  // https only; relative refs resolve against the member's site URL.
   const url = (v) => {
     if (typeof v !== "string") return undefined;
     try {
-      const u = new URL(v, site); // relative refs resolve against the member's site URL
-      return u.protocol === "https:" || u.protocol === "http:" ? u.href : undefined;
+      const u = new URL(v, site);
+      return u.protocol === "https:" ? u.href : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  // `feed` is fetched server-side by the builder and its contents are republished into
+  // our public feed.xml, so it must stay on the member's own origin — otherwise a member
+  // file is a standing instruction for CI to fetch an arbitrary host and publish the
+  // result. `avatar` gets no such restriction: it is only ever an <img src> resolved by
+  // the visitor's browser, never fetched by us, so a CDN-hosted avatar is fine.
+  const sameOriginUrl = (v) => {
+    const href = url(v);
+    if (!href) return undefined;
+    try {
+      return new URL(href).origin === new URL(site).origin ? href : undefined;
     } catch {
       return undefined;
     }
@@ -252,7 +384,7 @@ function sanitize(data, site) {
     name: text(data.name, 60) || label,
     description: text(data.description, 200) || "",
     avatar: url(data.avatar),
-    feed: url(data.feed),
+    feed: sameOriginUrl(data.feed),
     program: text(data.program, 40),
     socials: sanitizeSocials(data.socials),
     tags,
@@ -277,9 +409,16 @@ export async function fetchPosts(member, timeoutMs, limit = 3) {
     const date = tag("pubDate") || tag("published") || tag("updated");
     const title = tag("title");
     if (!title || !link) continue;
+    // Post links land in index.json and feed.xml, which member widgets and feed readers
+    // consume directly, so hold them to the same http(s)-only rule as everything else.
+    // A raw "javascript:" href parses fine as an absolute URL and must not survive.
     try {
-      link = new URL(link, member.homepage).href;
-    } catch {}
+      const u = new URL(link, member.homepage);
+      if (u.protocol !== "https:" && u.protocol !== "http:") continue;
+      link = u.href;
+    } catch {
+      continue;
+    }
     out.push({
       title: title.slice(0, 140),
       link,

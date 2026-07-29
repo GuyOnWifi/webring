@@ -43,10 +43,14 @@ jobs:
           pr='${{ github.event.pull_request.number }}'
           files_json=$(gh api "repos/${{ github.repository }}/pulls/$pr/files" --paginate)
           echo "files=$(echo "$files_json" | jq -r '.[].filename' | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
-          # Auto-merge ONLY pure additions of member files. Editing, deleting, or renaming
-          # an existing entry (or touching any non-member file) drops to human review, so a
-          # PR can't grief someone else's file.
-          echo "safe=$(echo "$files_json" | jq -r 'length > 0 and all(.[]; .status == "added" and (.filename | test("^members/[^/]+\\.json$")))')" >> "$GITHUB_OUTPUT"
+          # Ownership + dedup: a member file is named for the PR author's GitHub login, so you
+          # can only add YOUR OWN entry, exactly one per account. Auto-merge only when the PR
+          # adds precisely members/<login>.json and nothing else. Edits, deletes, a wrong
+          # name, or extra files drop to human review, so a PR can't grief or squat another's
+          # file. (One file also caps outbound verification fetches at one per PR.)
+          author=$(printf '%s' '${{ github.event.pull_request.user.login }}' | tr '[:upper:]' '[:lower:]')
+          echo "author=$author" >> "$GITHUB_OUTPUT"
+          echo "safe=$(echo "$files_json" | jq --arg f "members/${author}.json" -r 'length > 0 and all(.[]; .filename == $f and .status == "added")')" >> "$GITHUB_OUTPUT"
           git fetch origin "pull/$pr/head:pr" --depth=1
           git checkout pr -- members/
 
@@ -61,6 +65,8 @@ jobs:
         env:
           CHANGED_FILES: ${{ steps.diff.outputs.files }}
           PR_COMMENT_FILE: pr-comment.md
+          PR_SAFE: ${{ steps.diff.outputs.safe }}
+          PR_AUTHOR: ${{ steps.diff.outputs.author }}
         run: node scripts/verify.mjs
 
       # Always post the bot's findings on the PR thread, pass or fail. On failure the
@@ -84,9 +90,16 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
         run: |
           gh label create ready-to-merge --color 0e8a16 --description "passed checks; merges after the review window" --force >/dev/null 2>&1 || true
+          # Ensure the brake exists for exactly the PRs that are now on the merge track:
+          # `gh pr edit --add-label hold` errors on an undefined label, and this is the
+          # moment a maintainer might need it.
+          gh label create hold --color b60205 --description "maintainer objection; blocks auto-merge" --force >/dev/null 2>&1 || true
           gh pr edit "$PR" --add-label ready-to-merge
-      - name: Clear ready mark on failure
-        if: failure()
+      # Clear the mark whenever this run did NOT earn it — a failed check, or a push that
+      # kept verification green but made the PR no longer additions-only. Keying this off
+      # `failure()` alone left a stale label from an earlier passing run.
+      - name: Clear ready mark
+        if: always() && (failure() || steps.diff.outputs.safe != 'true')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR: ${{ github.event.pull_request.number }}
