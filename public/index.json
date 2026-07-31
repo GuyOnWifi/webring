@@ -5,7 +5,7 @@
     "url": "https://guyonwifi.github.io/webring",
     "description": "A self-running webring for the UW CS community."
   },
-  "generated": "2026-07-31T03:18:23.925Z",
+  "generated": "2026-07-31T08:54:10.179Z",
   "count": 2,
   "tags": [
     "cuda",
@@ -51,8 +51,8 @@
       "socials": {},
       "tags": [],
       "ok": false,
-      "failures": 1,
-      "error": "couldn't read .well-known/webring.json (HTTP 502)",
+      "failures": 2,
+      "error": "couldn't read .well-known/webring.json (HTTP 523)",
       "lastPost": null
     }
   ]
