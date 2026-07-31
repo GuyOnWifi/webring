@@ -5,8 +5,8 @@
     "url": "https://guyonwifi.github.io/webring",
     "description": "A self-running webring for the UW CS community."
   },
-  "generated": "2026-07-31T14:14:13.421Z",
-  "count": 1,
+  "generated": "2026-07-31T19:38:23.711Z",
+  "count": 2,
   "tags": [
     "cuda",
     "infra",
@@ -43,6 +43,17 @@
       "ok": true,
       "failures": 0,
       "lastPost": "Sat, 18 Apr 2026 00:00:00 GMT"
+    },
+    {
+      "site": "https://web.easonhuang.dev/",
+      "domain": "web.easonhuang.dev",
+      "homepage": "https://web.easonhuang.dev/",
+      "socials": {},
+      "tags": [],
+      "ok": false,
+      "failures": 1,
+      "error": "couldn't read .well-known/webring.json (HTTP 502)",
+      "lastPost": null
     }
   ]
 }
