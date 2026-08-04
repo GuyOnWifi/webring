@@ -12,20 +12,31 @@ const out = join(ROOT, "public");
 await mkdir(out, { recursive: true });
 const now = process.env.BUILD_TIME || new Date().toISOString();
 
-// Carry forward failure counts so we only drop after N consecutive misses.
-// Keep the raw prior files too, so the stable-timestamp guard below can tell a
-// real data change from pure timestamp churn.
+// Prior state: failure counts + lastPost to carry forward, plus the last index/feed for
+// the stable-timestamp guard below. The derived data is NOT committed to git (that spammed
+// the history), so read it from the LIVE deployed site. Falls back to a local file (offline
+// dev), then to empty (the first ever run, before anything is deployed).
+const priorBase = (process.env.PREV_BASE_URL || cfg.url || "").replace(/\/+$/, "");
+async function prior(name) {
+  if (priorBase) {
+    try {
+      const r = await fetch(`${priorBase}/${name}`, { signal: AbortSignal.timeout(cfg.fetchTimeoutMs || 8000) });
+      if (r.ok) return await r.text();
+    } catch {}
+  }
+  try {
+    return await readFile(join(out, name), "utf8");
+  } catch {}
+  return null;
+}
 let prev = {};
-let oldIndexRaw = null;
-let oldFeedRaw = null;
-try {
-  oldIndexRaw = await readFile(join(out, "index.json"), "utf8");
-  const old = JSON.parse(oldIndexRaw);
-  for (const m of old.members || []) prev[m.site || m.domain] = m;
-} catch {}
-try {
-  oldFeedRaw = await readFile(join(out, "feed.json"), "utf8");
-} catch {}
+const oldIndexRaw = await prior("index.json");
+const oldFeedRaw = await prior("feed.json");
+if (oldIndexRaw) {
+  try {
+    for (const m of JSON.parse(oldIndexRaw).members || []) prev[m.site || m.domain] = m;
+  } catch {}
+}
 
 const resolved = await Promise.all(
   members.map(async ({ site }) => {

@@ -1,8 +1,9 @@
 # Self-healing data loop + static deploy. On a schedule (and on push to main), it
-# re-scrapes every member, prunes dead sites, refreshes the planet feed, commits the
-# data back (so failure counts persist), then builds the static site and deploys it to
-# GitHub Pages. The committed public/*.json is still consumed directly by member widgets;
-# Pages serves the human-facing directory / planet / map.
+# re-scrapes every member, prunes dead sites, refreshes the planet feed, then builds the
+# static site and deploys it to GitHub Pages. The derived data (index/feed/opml) is NOT
+# committed to git, that spammed the history; it lives only in the deployed artifact, and
+# the builder reads prior state (failure counts, lastPost) back from the live site. Pages
+# serves the human-facing directory / planet / map and the JSON the widgets consume.
 name: refresh + deploy
 on:
   schedule:
@@ -11,13 +12,13 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# One run at a time: avoid racing on the data commit or overlapping Pages deploys.
+# One run at a time: avoid overlapping Pages deploys.
 concurrency:
   group: refresh-deploy
   cancel-in-progress: false
 
 permissions:
-  contents: write # commit refreshed data
+  contents: read # checkout only; derived data is deployed, never committed
   pages: write # deploy to Pages
   id-token: write # OIDC for deploy-pages
 
@@ -37,14 +38,6 @@ jobs:
 
       - name: Scrape members + rebuild index/feed
         run: npm run scrape
-
-      - name: Commit refreshed data
-        run: |
-          git config user.name "webring-bot"
-          git config user.email "bot@users.noreply.github.com"
-          git add public/index.json public/feed.json public/feed.xml public/members.opml
-          git commit -m "chore: rebuild index [skip ci]" || echo "no changes"
-          git push || echo "nothing to push"
 
       - name: Build static site
         env:

@@ -1,19 +1,14 @@
 # UW CS Webring
 
-A webring that runs itself. No maintainer approval, no rotting links, no dead ring.
+A webring that runs itself.
 
-Most webrings die when the maintainer stops clicking "merge." This one removes the
-human from the loop, F-Droid style: **the registry only stores consent; every site is
-the source of truth for its own metadata.**
-
-- **You join by editing _your_ site, not begging a maintainer.** A bot verifies you
-  own your domain and auto-merges.
+- **You update information by editing _your_ site, not begging a maintainer.**
 - **The ring heals itself.** A cron scrapes every member, drops dead sites, and the
   widget re-stitches neighbors live. Nobody re-links anything, ever.
-- **Planet feed.** Every member's blog, aggregated into one river + combined RSS + OPML.
+- **Aggregated feed.** Every member's blog, aggregated into one river + combined RSS + OPML.
 - **Live directory** with search, tag filters, activity ("posted 3d ago"), and an
   animated **ring map** of the topology.
-- **It's a toolchain, not a list.** Fork it to run your own ring in 5 minutes.
+- **Designed to be extensible** Fork it to run your own ring in 5 minutes!
 
 ## How to join (2 minutes)
 
@@ -33,6 +28,7 @@ the source of truth for its own metadata.**
      }
    }
    ```
+
    Each top-level key is a **ring namespace**; the presence of a `"uwcs"` block is how you
    opt in. Serving this file proves you control the site, that's your consent. There's no
    `url` field: your homepage is just the site you register in step 2.
@@ -41,11 +37,19 @@ the source of truth for its own metadata.**
 
    ```json
    {
-     "$shared": { "name": "Your Name", "avatar": "/me.png", "feed": "/index.xml" },
-     "uwcs": { "description": "systems hacker @ waterloo", "tags": ["rust", "systems"] },
+     "$shared": {
+       "name": "Your Name",
+       "avatar": "/me.png",
+       "feed": "/index.xml"
+     },
+     "uwcs": {
+       "description": "systems hacker @ waterloo",
+       "tags": ["rust", "systems"]
+     },
      "some-other-ring": { "description": "aspiring poet", "tags": ["writing"] }
    }
    ```
+
    Reserved `$`-prefixed keys aren't rings; `$shared` is merged underneath every ring block
    (the ring block wins) so you don't repeat yourself.
 
@@ -61,6 +65,7 @@ the source of truth for its own metadata.**
    ```json
    { "site": "https://your-site.com/" }
    ```
+
    That's the whole file: your site URL. A bare host like `"you.com"` works too, and a path
    is fine for shared hosting: `{ "site": "https://www.student.math.uwaterloo.ca/~you/" }`.
    Sites are always registered as **https** (an `http://` URL is upgraded, not kept). The
@@ -72,19 +77,35 @@ the source of truth for its own metadata.**
 
    ```html
    <div data-webring="uwcs" style="display:flex;align-items:center;gap:8px">
-     <a href="https://guyonwifi.github.io/webring/hop.html?from=your-site.com&nav=prev" title="previous site">←</a>
-     <a href="https://guyonwifi.github.io/webring" target="_blank" rel="noopener" title="uw cs webring">
-       <img src="https://guyonwifi.github.io/webring/icon.svg" alt="uw cs webring" width="20" height="20" />
+     <a
+       href="https://guyonwifi.github.io/webring/hop.html?from=your-site.com&nav=prev"
+       title="previous site"
+       >←</a
+     >
+     <a
+       href="https://guyonwifi.github.io/webring"
+       target="_blank"
+       rel="noopener"
+       title="uw cs webring"
+     >
+       <img
+         src="https://guyonwifi.github.io/webring/icon.svg"
+         alt="uw cs webring"
+         width="20"
+         height="20"
+       />
      </a>
-     <a href="https://guyonwifi.github.io/webring/hop.html?from=your-site.com&nav=next" title="next site">→</a>
+     <a
+       href="https://guyonwifi.github.io/webring/hop.html?from=your-site.com&nav=next"
+       title="next site"
+       >→</a
+     >
    </div>
    ```
+
    Swap both `from=your-site.com` for your site (a host, or `host/~you` if you're on
-   path hosting). Plain HTML, no scripts. Displaying the widget is a **requirement** of
-   membership and the bot will remind you if it's missing, but it is not what proves the
-   site is yours: `data-webring="uwcs"` is just a substring of a page, and any site that
-   renders someone else's comments could be made to carry it. Ownership is proved by the
-   manifest in step 1, and only by that. Prev/next resolve against the live ring at click
+   path hosting). Displaying the widget is a **requirement** of
+   membership and the bot will remind you if it's missing. Prev/next resolve against the live ring at click
    time (via `hop.html`), so neighbours re-stitch as sites come and go, and you never edit
    this again.
 
@@ -103,14 +124,14 @@ you edit YOUR site (well-known manifest + widget snippet)
   members' widgets hop via index.json ──► ring is always current & self-healing
 ```
 
-| Piece | File | Job |
-|-------|------|-----|
-| Member record | `members/*.json` | The only PR-editable data: one site URL. |
-| Manifest spec | `<site>/.well-known/webring.json` | Per-site metadata + proof of consent. |
-| Verify bot | `scripts/verify.mjs` + `.github/workflows/ci.yml` | Replaces the maintainer. |
-| Auto-merge | `.github/workflows/automerge.yml` | Hourly sweep; merges what's sat out the review window. |
-| Builder | `scripts/build.mjs` + `.github/workflows/deploy.yml` | Derives `index.json`, prunes the dead, deploys. |
-| Widget | pasted HTML + `public/hop.html` | Static embed + `data-webring` marker; prev/next resolve live, self-healing. |
+| Piece         | File                                                 | Job                                                                         |
+| ------------- | ---------------------------------------------------- | --------------------------------------------------------------------------- |
+| Member record | `members/*.json`                                     | The only PR-editable data: one site URL.                                    |
+| Manifest spec | `<site>/.well-known/webring.json`                    | Per-site metadata + proof of consent.                                       |
+| Verify bot    | `scripts/verify.mjs` + `.github/workflows/ci.yml`    | Replaces the maintainer.                                                    |
+| Auto-merge    | `.github/workflows/automerge.yml`                    | Hourly sweep; merges what's sat out the review window.                      |
+| Builder       | `scripts/build.mjs` + `.github/workflows/deploy.yml` | Derives `index.json`, prunes the dead, deploys.                             |
+| Widget        | pasted HTML + `public/hop.html`                      | Static embed + `data-webring` marker; prev/next resolve live, self-healing. |
 
 ### Stopping a merge
 
@@ -134,7 +155,7 @@ that needs a mechanism:
 
 Next.js (App Router) + Tailwind, **statically exported** and hosted on **GitHub Pages**.
 No server, no Vercel. The scraper (`scripts/*.mjs`) runs in GitHub Actions; Next reads
-the committed JSON at build time and prerenders the site.
+the freshly-scraped JSON at build time and prerenders the site.
 
 ## Run your own ring (fork it)
 
@@ -171,7 +192,7 @@ npm run verify     # confirm members proved domain ownership (CI)
   origin, because the builder fetches it server-side and republishes what comes back;
   `avatar` may point anywhere, since it's only ever an `<img src>` your browser loads.
 - **Bounded fetches.** Every outbound request is https-only, times out after
-  `fetchTimeoutMs`, and is truncated *during* transfer at 64KB for a manifest, 512KB for
+  `fetchTimeoutMs`, and is truncated _during_ transfer at 64KB for a manifest, 512KB for
   a page, and 2MB for a feed. Redirects are followed by hand, at most 5 deep, so each hop
   is re-checked; addresses that aren't public unicast (loopback, RFC1918, link-local,
   CGNAT) are refused, so a member file can't aim CI at an internal service.
