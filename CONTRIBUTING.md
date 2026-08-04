@@ -20,5 +20,5 @@ improvement:
 
 ## Forking it for your own ring
 
-See [Run your own ring](README.md#run-your-own-ring-fork-it). Pick your own ring
+See [Run your own ring](DESIGN.md#run-your-own-ring-fork-it). Pick your own ring
 namespace; don't reuse `uwcs`.
