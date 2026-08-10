@@ -2,6 +2,8 @@
 
 A webring that runs itself.
 
+The UW CS Webring is now hosted at [webring.cs31.ca](https://webring.cs31.ca).
+
 - **Membership within ~24h.** A bot merges the PR in 24h, with time for maintainers to step in.
   We trust that you're joining this webring because you're an actual student, not a larper.
 - **You update information by editing _your_ site, not begging a maintainer.** Just change your `.well-known/webring.json`.
